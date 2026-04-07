@@ -2065,7 +2065,8 @@ body {
   // openProject(idx) is defined above in multi-project section
   function goBack(id) {
     showScreen(id);
-    if (id !== 'screen-player') stopTC();
+    // Only stop TC if no audio is playing — keep frame loop alive for LTC updates
+    if (id !== 'screen-player' && !_audio) stopTC();
     if (id === 'screen-projects') renderProjectList();
   }
   function toggleSeg(btn) {
