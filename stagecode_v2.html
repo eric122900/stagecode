@@ -687,6 +687,22 @@ body {
 .emoji-pick:hover { border-color: var(--text2); }
 .emoji-pick.selected { border-color: var(--accent); background: var(--accent-dim); }
 
+.drive-folder-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface2); border-radius: var(--radius-pill);
+  padding: 6px 8px 6px 12px; font-size: 11px; font-weight: 700;
+  color: var(--text2);
+}
+.drive-folder-chip span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'DM Mono', monospace; }
+.drive-folder-chip .chip-count { color: var(--accent); font-family: 'Nunito', sans-serif; flex-shrink: 0; }
+.drive-folder-chip button {
+  width: 20px; height: 20px; border-radius: 50%; border: none;
+  background: var(--surface3); color: var(--muted); cursor: pointer;
+  font-size: 11px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.drive-folder-chip button:hover { background: rgba(255,50,50,0.15); color: #ff5555; }
+
 .fps-select {
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: var(--radius-pill); padding: 5px 12px;
@@ -1008,10 +1024,12 @@ body {
         <div class="modal-title" style="margin:0;">Google Drive</div>
         <button class="delete-cancel-btn" onclick="closeModal('driveModal')">關閉</button>
       </div>
-      <!-- folder input -->
+      <!-- linked folders -->
+      <div id="driveFolderList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;flex-shrink:0;"></div>
+      <!-- add folder input -->
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-shrink:0;">
         <input class="modal-input" id="driveFolderInput" placeholder="貼上 Drive 資料夾 ID 或網址…" style="margin:0;flex:1;" />
-        <button class="color-apply-btn" onclick="driveLoadFolder()">載入</button>
+        <button class="color-apply-btn" onclick="driveLoadFolder()">＋ 載入</button>
       </div>
       <!-- file list -->
       <div id="driveFileList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
@@ -1223,11 +1241,16 @@ body {
     setProjectFps(p.fpsKey || '30');
     updateProjectHeaders();
 
+    // Migrate old single driveFolderId to driveFolders array
+    if (p.driveFolderId && !p.driveFolders) {
+      p.driveFolders = [{ id: p.driveFolderId }];
+      delete p.driveFolderId;
+      saveToStorage();
+    }
     // Restore project-scoped Drive files
     _driveFiles = p.driveFiles || [];
     _allDriveFiles = new Map();
     _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
-    // Also add files referenced by songs (in case driveFiles wasn't saved)
     songs.forEach(s => {
       if (s.driveFileId && !_allDriveFiles.has(s.driveFileId)) {
         _allDriveFiles.set(s.driveFileId, s.driveFileName || s.driveFileId);
@@ -3079,15 +3102,59 @@ body {
 
   function driveCardClick() {
     if (_driveToken) {
-      // Pre-fill folder ID if project has one saved
-      const p = currentProject();
-      if (p && p.driveFolderId) {
-        document.getElementById('driveFolderInput').value = p.driveFolderId;
-      }
+      document.getElementById('driveFolderInput').value = '';
+      renderDriveFolderList();
+      renderDriveFileList();
       showModal('driveModal');
       return;
     }
     driveSignIn();
+  }
+
+  function renderDriveFolderList() {
+    const container = document.getElementById('driveFolderList');
+    const p = currentProject();
+    const folders = (p && p.driveFolders) || [];
+    if (!folders.length) { container.innerHTML = ''; return; }
+    container.innerHTML = folders.map((f, i) => {
+      const fileCount = (p.driveFiles || []).filter(df => df.folderId === f.id).length;
+      return `<div class="drive-folder-chip">
+        <span title="${f.id}">${f.id}</span>
+        <span class="chip-count">${fileCount} files</span>
+        <button onclick="event.stopPropagation(); removeDriveFolder(${i})" title="移除">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  function removeDriveFolder(idx) {
+    const p = currentProject();
+    if (!p || !p.driveFolders) return;
+    const folderId = p.driveFolders[idx].id;
+    p.driveFolders.splice(idx, 1);
+    // Remove files from this folder
+    p.driveFiles = (p.driveFiles || []).filter(f => f.folderId !== folderId);
+    // Rebuild runtime state
+    _driveFiles = p.driveFiles || [];
+    _allDriveFiles = new Map();
+    _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
+    saveToStorage();
+    renderDriveFolderList();
+    renderDriveFileList();
+  }
+
+  function renderDriveFileList() {
+    const list = document.getElementById('driveFileList');
+    if (!_driveFiles.length) {
+      list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">沒有音檔，請載入資料夾</div>';
+      return;
+    }
+    const sorted = [..._driveFiles].sort((a, b) => a.name.localeCompare(b.name));
+    list.innerHTML = sorted.map(f =>
+      `<div class="drive-file-row">
+        <span class="drive-file-icon">🎵</span>
+        <span class="drive-file-name">${f.name}</span>
+      </div>`
+    ).join('');
   }
 
   function driveSignIn() {
@@ -3109,10 +3176,15 @@ body {
   async function driveLoadFolder() {
     if (!_driveToken) { driveSignIn(); return; }
     let input = document.getElementById('driveFolderInput').value.trim();
-    // extract folder ID from URL if needed
     const m = input.match(/[-\w]{25,}/);
     const folderId = m ? m[0] : input;
     if (!folderId) { alert('請輸入資料夾 ID 或網址'); return; }
+
+    const p = currentProject();
+    // Check if folder already linked
+    if (p && p.driveFolders && p.driveFolders.some(f => f.id === folderId)) {
+      alert('這個資料夾已經連結了'); return;
+    }
 
     const list = document.getElementById('driveFileList');
     list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">載入中…</div>';
@@ -3124,31 +3196,41 @@ body {
       );
       const data = await resp.json();
       if (data.error) { throw new Error(data.error.message); }
-      // filter audio files
-      _driveFiles = (data.files || []).filter(f =>
+
+      const newFiles = (data.files || []).filter(f =>
         /\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i.test(f.name)
-      );
-      // Save to current project
-      _allDriveFiles = new Map();
-      _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
-      const p = currentProject();
-      if (p) {
-        p.driveFiles = _driveFiles.map(f => ({ id: f.id, name: f.name }));
-        p.driveFolderId = folderId;
-        saveToStorage();
-      }
-      if (!_driveFiles.length) {
+      ).map(f => ({ id: f.id, name: f.name, folderId }));
+
+      if (!newFiles.length) {
         list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">資料夾裡沒有找到音檔</div>';
         return;
       }
-      list.innerHTML = _driveFiles.map(f =>
-        `<div class="drive-file-row">
-          <span class="drive-file-icon">🎵</span>
-          <span class="drive-file-name">${f.name}</span>
-        </div>`
-      ).join('');
 
-      // Start background preload of all files immediately
+      // Append to project (not replace)
+      if (p) {
+        if (!p.driveFolders) p.driveFolders = [];
+        p.driveFolders.push({ id: folderId });
+        // Migrate old single driveFolderId if exists
+        if (p.driveFolderId && !p.driveFolders.some(f => f.id === p.driveFolderId)) {
+          p.driveFolders.unshift({ id: p.driveFolderId });
+        }
+        delete p.driveFolderId;
+        // Append new files (avoid duplicates)
+        if (!p.driveFiles) p.driveFiles = [];
+        const existingIds = new Set(p.driveFiles.map(f => f.id));
+        newFiles.forEach(f => { if (!existingIds.has(f.id)) p.driveFiles.push(f); });
+        saveToStorage();
+      }
+
+      // Rebuild runtime state
+      _driveFiles = (p && p.driveFiles) || newFiles;
+      _allDriveFiles = new Map();
+      _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
+
+      document.getElementById('driveFolderInput').value = '';
+      renderDriveFolderList();
+      renderDriveFileList();
+
       bgPreloadAll();
     } catch(e) {
       list.innerHTML = `<div style="text-align:center;color:#ff5555;font-size:13px;padding:24px;">載入失敗：${e.message}</div>`;
