@@ -2462,9 +2462,8 @@ body {
       audioInfo.textContent = '未配對';
     }
 
-    // Build dropdown from ALL known files: _driveFiles + files referenced by any song
-    const allFiles = new Map();
-    _driveFiles.forEach(f => allFiles.set(f.id, f.name));
+    // Build dropdown from ALL known files: accumulated Drive files + song references
+    const allFiles = new Map(_allDriveFiles);
     songs.forEach(song => {
       if (song.driveFileId && !allFiles.has(song.driveFileId)) {
         allFiles.set(song.driveFileId, song.driveFileName || song.driveFileId);
@@ -2512,9 +2511,8 @@ body {
         if (audioSel) {
           const newFileId = audioSel.value;
           if (newFileId) {
-            const file = _driveFiles.find(f => f.id === newFileId);
             songs[idx].driveFileId = newFileId;
-            songs[idx].driveFileName = file ? file.name : (songs[idx].driveFileName || newFileId);
+            songs[idx].driveFileName = _allDriveFiles.get(newFileId) || songs[idx].driveFileName || newFileId;
           } else {
             // Remove assignment
             delete songs[idx].driveFileId;
@@ -2861,6 +2859,7 @@ body {
   const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
   let _driveToken = null;
   let _driveFiles = []; // { id, name } from loaded folder
+  let _allDriveFiles = new Map(); // accumulated: id → name (persists across folder loads)
   let _driveMatches = []; // { song, file, type, selected }
 
   // ── Google token persistence ──
@@ -2935,6 +2934,8 @@ body {
       _driveFiles = (data.files || []).filter(f =>
         /\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i.test(f.name)
       );
+      // Accumulate all known files
+      _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
       if (!_driveFiles.length) {
         list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">資料夾裡沒有找到音檔</div>';
         return;
