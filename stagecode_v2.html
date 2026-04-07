@@ -2567,19 +2567,8 @@ body {
       audioInfo.textContent = '未配對';
     }
 
-    // Build dropdown from ALL known files: accumulated Drive files + song references
-    const allFiles = new Map(_allDriveFiles);
-    songs.forEach(song => {
-      if (song.driveFileId && !allFiles.has(song.driveFileId)) {
-        allFiles.set(song.driveFileId, song.driveFileName || song.driveFileId);
-      }
-    });
-    audioSel.innerHTML = '<option value="">— 無（移除配對）—</option>';
-    const sorted = [...allFiles.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-    sorted.forEach(([id, name]) => {
-      const selected = (s.driveFileId === id) ? ' selected' : '';
-      audioSel.innerHTML += `<option value="${id}"${selected}>${name}</option>`;
-    });
+    // Build grouped dropdown (by folder, then alphabetical)
+    audioSel.innerHTML = buildAudioSelectOptions(s.driveFileId);
 
     updateFFMax();
     showModal('editModal');
@@ -2617,7 +2606,8 @@ body {
           const newFileId = audioSel.value;
           if (newFileId) {
             songs[idx].driveFileId = newFileId;
-            songs[idx].driveFileName = _allDriveFiles.get(newFileId) || songs[idx].driveFileName || newFileId;
+            const selOpt = audioSel.selectedOptions[0];
+            songs[idx].driveFileName = (selOpt && selOpt.text) || _allDriveFiles.get(newFileId) || newFileId;
           } else {
             // Remove assignment
             delete songs[idx].driveFileId;
@@ -3151,7 +3141,7 @@ body {
     const p = currentProject();
     const folders = (p && p.driveFolders) || [];
 
-    // Group files by folderId, then sort each group alphabetically
+    // Group files by folderId
     const groups = new Map();
     _driveFiles.forEach(f => {
       const fid = f.folderId || 'unknown';
@@ -3160,25 +3150,65 @@ body {
     });
     groups.forEach(files => files.sort((a, b) => a.name.localeCompare(b.name)));
 
-    // Render grouped by folder
+    // Render: folder header + indented files
     let html = '';
-    // Order groups by folder order in driveFolders
     const folderOrder = folders.map(f => f.id);
-    // Add any unknown groups at the end
     groups.forEach((_, fid) => { if (!folderOrder.includes(fid)) folderOrder.push(fid); });
 
     folderOrder.forEach(fid => {
       const files = groups.get(fid);
       if (!files || !files.length) return;
-      html += `<div style="font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:8px 4px 4px;margin-top:4px;">📁 ${fid.slice(0, 20)}… · ${files.length} files</div>`;
+      html += `<div style="font-size:11px;font-weight:800;color:var(--text2);padding:10px 4px 6px;margin-top:4px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+        <span style="font-size:14px;">📁</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'DM Mono',monospace;font-size:10px;">${fid}</span>
+        <span style="color:var(--muted);font-size:10px;flex-shrink:0;">${files.length} files</span>
+      </div>`;
       html += files.map(f =>
-        `<div class="drive-file-row">
+        `<div class="drive-file-row" style="padding-left:24px;">
           <span class="drive-file-icon">🎵</span>
           <span class="drive-file-name">${f.name}</span>
         </div>`
       ).join('');
     });
     list.innerHTML = html;
+  }
+
+  // Build grouped + sorted options for audio select dropdowns
+  function buildAudioSelectOptions(selectedId) {
+    const p = currentProject();
+    const folders = (p && p.driveFolders) || [];
+    const allFiles = new Map();
+    _driveFiles.forEach(f => allFiles.set(f.id, f));
+    songs.forEach(s => {
+      if (s.driveFileId && !allFiles.has(s.driveFileId)) {
+        allFiles.set(s.driveFileId, { id: s.driveFileId, name: s.driveFileName || s.driveFileId, folderId: 'other' });
+      }
+    });
+
+    // Group by folder
+    const groups = new Map();
+    allFiles.forEach(f => {
+      const fid = f.folderId || 'other';
+      if (!groups.has(fid)) groups.set(fid, []);
+      groups.get(fid).push(f);
+    });
+    groups.forEach(files => files.sort((a, b) => a.name.localeCompare(b.name)));
+
+    let html = '<option value="">— 無（移除配對）—</option>';
+    const folderOrder = folders.map(f => f.id);
+    groups.forEach((_, fid) => { if (!folderOrder.includes(fid)) folderOrder.push(fid); });
+
+    folderOrder.forEach(fid => {
+      const files = groups.get(fid);
+      if (!files || !files.length) return;
+      html += `<optgroup label="📁 ${fid.slice(0, 25)}…">`;
+      files.forEach(f => {
+        const sel = (f.id === selectedId) ? ' selected' : '';
+        html += `<option value="${f.id}"${sel}>${f.name}</option>`;
+      });
+      html += '</optgroup>';
+    });
+    return html;
   }
 
   function driveSignIn() {
