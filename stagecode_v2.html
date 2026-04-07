@@ -663,7 +663,8 @@ body {
   padding: 10px 12px; background: var(--surface2);
   border-radius: 10px; font-size: 13px;
 }
-.drive-file-icon { font-size: 18px; flex-shrink: 0; }
+.drive-file-icon { flex-shrink: 0; width: 18px; height: 18px; color: var(--muted); }
+.drive-folder-icon { flex-shrink: 0; width: 16px; height: 16px; color: var(--accent); }
 .drive-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
 .drive-file-name.matched { color: var(--text); }
 .match-row {
@@ -3109,6 +3110,7 @@ body {
     container.innerHTML = folders.map((f, i) => {
       const fileCount = (p.driveFiles || []).filter(df => df.folderId === f.id).length;
       return `<div class="drive-folder-chip">
+        <svg class="drive-folder-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
         <span title="${f.id}">${f.id}</span>
         <span class="chip-count">${fileCount} files</span>
         <button onclick="event.stopPropagation(); removeDriveFolder(${i})" title="移除">✕</button>
@@ -3158,14 +3160,14 @@ body {
     folderOrder.forEach(fid => {
       const files = groups.get(fid);
       if (!files || !files.length) return;
-      html += `<div style="font-size:11px;font-weight:800;color:var(--text2);padding:10px 4px 6px;margin-top:4px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">
-        <span style="font-size:14px;">📁</span>
+      html += `<div style="font-size:11px;font-weight:800;color:var(--text2);padding:10px 4px 6px;margin-top:4px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+        <svg style="width:16px;height:16px;color:var(--accent);flex-shrink:0;" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'DM Mono',monospace;font-size:10px;">${fid}</span>
         <span style="color:var(--muted);font-size:10px;flex-shrink:0;">${files.length} files</span>
       </div>`;
       html += files.map(f =>
-        `<div class="drive-file-row" style="padding-left:24px;">
-          <span class="drive-file-icon">🎵</span>
+        `<div class="drive-file-row" style="padding-left:28px;">
+          <svg class="drive-file-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
           <span class="drive-file-name">${f.name}</span>
         </div>`
       ).join('');
@@ -3201,7 +3203,7 @@ body {
     folderOrder.forEach(fid => {
       const files = groups.get(fid);
       if (!files || !files.length) return;
-      html += `<optgroup label="📁 ${fid.slice(0, 25)}…">`;
+      html += `<optgroup label="▸ ${fid.slice(0, 25)}…">`;
       files.forEach(f => {
         const sel = (f.id === selectedId) ? ' selected' : '';
         html += `<option value="${f.id}"${sel}>${f.name}</option>`;
