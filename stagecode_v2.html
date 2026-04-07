@@ -1097,9 +1097,14 @@ body {
 
   function attachAudioEvents(audioEl) {
     audioEl.ontimeupdate = () => {
-      if (!_audio || !_audio.duration) return;
-      seconds = Math.floor(_audio.currentTime);
-      progress = (_audio.currentTime / _audio.duration) * 100;
+      if (!audioEl.duration || isNaN(audioEl.duration)) return;
+      seconds = Math.floor(audioEl.currentTime);
+      progress = (audioEl.currentTime / audioEl.duration) * 100;
+      // directly update fill and thumb for reliability
+      const fill = document.getElementById('progressFill');
+      const thumb = document.getElementById('progressThumb');
+      if (fill) fill.style.width = progress + '%';
+      if (thumb) thumb.style.left = progress + '%';
       updateDisplay();
       updateMiniBar();
     };
