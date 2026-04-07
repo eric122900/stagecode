@@ -2471,7 +2471,8 @@ body {
       }
     });
     audioSel.innerHTML = '<option value="">— 無（移除配對）—</option>';
-    allFiles.forEach((name, id) => {
+    const sorted = [...allFiles.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    sorted.forEach(([id, name]) => {
       const selected = (s.driveFileId === id) ? ' selected' : '';
       audioSel.innerHTML += `<option value="${id}"${selected}>${name}</option>`;
     });
