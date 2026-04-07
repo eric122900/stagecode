@@ -1709,9 +1709,11 @@ body {
         fetch(_blobCache.get(fileId)).then(r => r.blob()).then(async blob => {
           await preDecodeLTC(blob);
           _ltcCache.set(fileId, _ltcTimeline);
-          // Auto-match medley songs after first decode
           autoMatchMedleySongs(fileId);
+          bgPreloadAll();
         });
+      } else {
+        bgPreloadAll();
       }
       return;
     }
@@ -1744,10 +1746,66 @@ body {
 
       // Auto-match medley songs
       autoMatchMedleySongs(fileId);
+
+      // Start background pre-load of all other songs' audio files
+      bgPreloadAll();
     })
     .catch(e => {
       console.warn('Drive 下載失敗:', e.message);
     });
+  }
+
+  // ── Background pre-load: download + decode LTC for ALL songs' audio files ──
+  let _bgPreloading = false;
+
+  async function bgPreloadAll() {
+    if (_bgPreloading) return; // already running
+    _bgPreloading = true;
+
+    // Collect unique fileIds that need downloading/decoding
+    const fileIds = new Set();
+    songs.forEach(s => {
+      if (s.driveFileId && !_ltcCache.has(s.driveFileId)) {
+        fileIds.add(s.driveFileId);
+      }
+    });
+
+    if (fileIds.size === 0) { _bgPreloading = false; return; }
+    console.log(`BG preload: ${fileIds.size} files to process`);
+
+    for (const fid of fileIds) {
+      try {
+        // Download blob if not cached
+        if (!_blobCache.has(fid)) {
+          if (!_driveToken) continue;
+          const apiUrl = `https://www.googleapis.com/drive/v3/files/${fid}?alt=media`;
+          const resp = await fetch(apiUrl, {
+            headers: { 'Authorization': 'Bearer ' + _driveToken },
+          });
+          if (!resp.ok) { console.warn(`BG: download failed ${fid}`); continue; }
+          const blob = await resp.blob();
+          _blobCache.set(fid, URL.createObjectURL(blob));
+
+          // Decode LTC
+          await preDecodeLTC(blob);
+          _ltcCache.set(fid, _ltcTimeline);
+          autoMatchMedleySongs(fid);
+          console.log(`BG preload: ${fid} done (${_ltcTimeline ? _ltcTimeline.length : 0} LTC frames)`);
+        } else if (!_ltcCache.has(fid)) {
+          // Blob cached but LTC not decoded yet
+          const blob = await fetch(_blobCache.get(fid)).then(r => r.blob());
+          await preDecodeLTC(blob);
+          _ltcCache.set(fid, _ltcTimeline);
+          autoMatchMedleySongs(fid);
+          console.log(`BG decode: ${fid} done (${_ltcTimeline ? _ltcTimeline.length : 0} LTC frames)`);
+        }
+      } catch (e) {
+        console.warn(`BG preload error ${fid}:`, e.message);
+      }
+    }
+
+    _bgPreloading = false;
+    console.log('BG preload: all done');
   }
 
   // ── Auto-match medley: assign same audio to nearby songs whose LTC exists in timeline ──
