@@ -1546,7 +1546,7 @@ body {
       `<div class="mini-song" id="mini-row-${x.i}" onclick="playSongIdx(${x.i})">
         <span class="mini-num">${String(pos + 1).padStart(2, '0')}</span>
         <div class="mini-dot"></div>
-        <span class="mini-title">${x.s.title}</span>
+        <span class="mini-title" style="${x.s.color ? 'color:' + x.s.color : ''}">${x.s.title}</span>
         <span class="mini-ltc">${x.s.ltc}</span>
       </div>`
     ).join('');
@@ -1578,7 +1578,9 @@ body {
     const pos = showList.findIndex(x => x.i === currentSongIdx);
     const entry = showList[pos >= 0 ? pos : 0];
     if (!entry) return;
-    document.getElementById('playerSongName').textContent = entry.s.title;
+    const nameEl = document.getElementById('playerSongName');
+    nameEl.textContent = entry.s.title;
+    nameEl.style.color = entry.s.color || '';
     document.getElementById('playerTrackInfo').textContent =
       `Track ${String((pos >= 0 ? pos : 0) + 1).padStart(2, '0')} of ${showList.length}`;
   }
@@ -3056,7 +3058,9 @@ body {
     if (currentSongIdx === null) { bar.classList.remove('visible'); return; }
     bar.classList.add('visible');
     const song = songs[currentSongIdx];
-    document.getElementById('miniBarTitle').textContent = song ? song.title : '—';
+    const mbTitle = document.getElementById('miniBarTitle');
+    mbTitle.textContent = song ? song.title : '—';
+    mbTitle.style.color = (song && song.color) ? song.color : '';
     // Show live decoded LTC in mini bar
     if (hasLiveTC()) {
       const tc = _ltcDecoded;
