@@ -1493,13 +1493,62 @@ body {
 
   function lookupTC(time) {
     if (!_ltcTimeline || _ltcTimeline.length === 0) return null;
+    // Binary search for nearest decoded frame at or before 'time'
     let lo = 0, hi = _ltcTimeline.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
       if (_ltcTimeline[mid].time <= time) lo = mid;
       else hi = mid - 1;
     }
-    return _ltcTimeline[lo];
+    const base = _ltcTimeline[lo];
+    if (!base) return null;
+
+    // Interpolate: calculate how many frames have elapsed since the decoded frame
+    const fps = getFpsNominal();
+    const elapsed = time - base.time;
+    if (elapsed < 0) return base;
+    const extraFrames = Math.round(elapsed * fps);
+
+    // Convert base TC to absolute frame count, add extra, convert back
+    let absFrame = base.hh * 108000 + base.mm * 1800 + base.ss * fps + base.ff + extraFrames;
+    // Handle overflow
+    const maxFramePerDay = 24 * 3600 * fps;
+    if (absFrame >= maxFramePerDay) absFrame %= maxFramePerDay;
+
+    const ff = absFrame % fps;
+    const totalSec = Math.floor(absFrame / fps);
+    const ss = totalSec % 60;
+    const mm = Math.floor(totalSec / 60) % 60;
+    const hh = Math.floor(totalSec / 3600) % 24;
+
+    return { hh, mm, ss, ff, dropFrame: base.dropFrame };
+  }
+
+  // Get LTC range of a timeline: { startTC, endTC } in total seconds
+  function getLTCRange(timeline) {
+    if (!timeline || timeline.length === 0) return null;
+    const first = timeline[0];
+    const last = timeline[timeline.length - 1];
+    return {
+      startSec: first.hh * 3600 + first.mm * 60 + first.ss,
+      endSec: last.hh * 3600 + last.mm * 60 + last.ss,
+      startTime: first.time,
+      endTime: last.time,
+    };
+  }
+
+  // Find the audio playback time for a given LTC timecode (in seconds)
+  function ltcToAudioTime(timeline, ltcSec) {
+    if (!timeline || timeline.length === 0) return null;
+    // Binary search for closest frame matching the LTC second
+    let lo = 0, hi = timeline.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      const frameSec = timeline[mid].hh * 3600 + timeline[mid].mm * 60 + timeline[mid].ss;
+      if (frameSec <= ltcSec) lo = mid;
+      else hi = mid - 1;
+    }
+    return timeline[lo].time;
   }
 
   function hasLiveTC() {
@@ -1625,28 +1674,27 @@ body {
   // Cache for pre-decoded LTC timelines (fileId → timeline array)
   const _ltcCache = new Map();
 
-  function playDriveAudio(fileId) {
+  function playDriveAudio(fileId, seekTime) {
     stopAudio();
     if (!fileId || !_driveToken) return;
 
     // If already cached as blob, play immediately
     if (_blobCache.has(fileId)) {
-      // Restore pre-decoded LTC if available
       if (_ltcCache.has(fileId)) {
         _ltcTimeline = _ltcCache.get(fileId);
       }
-      _playBlobUrl(_blobCache.get(fileId));
-      // Pre-decode LTC if not cached yet
+      _playBlobUrl(_blobCache.get(fileId), seekTime);
       if (!_ltcCache.has(fileId)) {
         fetch(_blobCache.get(fileId)).then(r => r.blob()).then(async blob => {
           await preDecodeLTC(blob);
           _ltcCache.set(fileId, _ltcTimeline);
+          // Auto-match medley songs after first decode
+          autoMatchMedleySongs(fileId);
         });
       }
       return;
     }
 
-    // Download entire file as blob
     const apiUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
 
     fetch(apiUrl, {
@@ -1660,30 +1708,74 @@ body {
       const blobUrl = URL.createObjectURL(blob);
       _blobCache.set(fileId, blobUrl);
 
-      // Pre-decode LTC from the blob
       await preDecodeLTC(blob);
       _ltcCache.set(fileId, _ltcTimeline);
 
-      // Only play if this song is still the current one
       if (currentSongIdx !== null && songs[currentSongIdx] && songs[currentSongIdx].driveFileId === fileId) {
-        _playBlobUrl(blobUrl);
+        // Recalculate seekTime now that we have the timeline
+        let st = seekTime;
+        if (st == null && _ltcTimeline && _ltcTimeline.length > 0) {
+          const songLtcSec = parseLTC(songs[currentSongIdx].ltc);
+          st = ltcToAudioTime(_ltcTimeline, songLtcSec);
+        }
+        _playBlobUrl(blobUrl, st);
       }
+
+      // Auto-match medley songs
+      autoMatchMedleySongs(fileId);
     })
     .catch(e => {
       console.warn('Drive 下載失敗:', e.message);
     });
   }
 
-  function _playBlobUrl(blobUrl) {
+  // ── Auto-match medley: assign same audio to songs whose LTC falls within range ──
+  function autoMatchMedleySongs(fileId) {
+    const timeline = _ltcCache.get(fileId);
+    const range = getLTCRange(timeline);
+    if (!range) return;
+
+    // Find the song that owns this file
+    const ownerSong = songs.find(s => s.driveFileId === fileId);
+    if (!ownerSong) return;
+    const ownerFileName = ownerSong.driveFileName || '';
+
+    let matched = 0;
+    songs.forEach(s => {
+      if (s.driveFileId) return; // already has a file assigned
+      const songLtcSec = parseLTC(s.ltc);
+      // Check if this song's LTC start falls within the audio's LTC range
+      if (songLtcSec >= range.startSec && songLtcSec <= range.endSec) {
+        s.driveFileId = fileId;
+        s.driveFileName = ownerFileName;
+        matched++;
+      }
+    });
+    if (matched > 0) {
+      console.log(`Medley auto-match: ${matched} songs linked to ${ownerFileName}`);
+      saveToStorage();
+      renderSetlist();
+    }
+  }
+
+  function _playBlobUrl(blobUrl, seekTime) {
     _audio = new Audio(blobUrl);
     _audio.preload = 'auto';
     attachAudioEvents(_audio);
-    _routeAudio(); // split channels: mute LTC, output Music to both speakers
-    const playPromise = _audio.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(e => {
-        console.warn('播放失敗:', e.message);
-      });
+    _routeAudio();
+
+    // If we need to seek to a specific position (medley song)
+    if (seekTime != null && seekTime > 0) {
+      _audio.addEventListener('loadedmetadata', () => {
+        _audio.currentTime = seekTime;
+        _audio.play().catch(() => {});
+      }, { once: true });
+      _audio.load();
+    } else {
+      const playPromise = _audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(e => { console.warn('播放失敗:', e.message); });
+      }
     }
   }
 
@@ -1702,10 +1794,14 @@ body {
     stopAudio();
     const song = songs[globalIdx];
     if (song && song.driveFileId && _driveToken) {
-      playDriveAudio(song.driveFileId);
+      // Check if we need to seek to a specific LTC position (medley)
+      const songLtcSec = parseLTC(song.ltc);
+      const timeline = _ltcCache.get(song.driveFileId);
+      const seekTime = timeline ? ltcToAudioTime(timeline, songLtcSec) : null;
+
+      playDriveAudio(song.driveFileId, seekTime);
       startFrameLoop();
     }
-    // No audio = no playback, TC stays in standby
     updateDisplay();
     updateMiniBar();
   }
