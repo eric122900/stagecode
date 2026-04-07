@@ -1201,8 +1201,12 @@ body {
     if (!fileId || !_driveToken) return;
     // Service Worker intercepts this URL and adds Authorization header
     const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&sw_token=${_driveToken}`;
-    _audio = new Audio(streamUrl);
+    _audio = new Audio();
+    _audio.preload = 'auto';
+    _audio.crossOrigin = 'anonymous';
     attachAudioEvents(_audio);
+    _audio.src = streamUrl;
+    _audio.load();
     const playPromise = _audio.play();
     if (playPromise !== undefined) {
       playPromise.catch(e => {
@@ -1237,6 +1241,7 @@ body {
   }
 
   // ── Progress scrubbing ──
+  let _pendingSeekTime = null;
   function initScrub() {
     const track = document.getElementById('progressTrack');
     const fill  = document.getElementById('progressFill');
@@ -1248,7 +1253,7 @@ body {
     }
 
     function applyPercent(pct) {
-      const totalDur = (_audio && _audio.duration) ? _audio.duration : SONG_DURATION;
+      const totalDur = (_audio && _audio.duration && isFinite(_audio.duration)) ? _audio.duration : SONG_DURATION;
       const elapsed = pct * totalDur;
       seconds = Math.floor(elapsed);
       progress = pct * 100;
@@ -1256,10 +1261,8 @@ body {
       fill.style.width = progress + '%';
       const th = document.getElementById('progressThumb');
       if (th) th.style.left = progress + '%';
-      // seek audio
-      if (_audio && _audio.duration && !isNaN(elapsed)) {
-        _audio.currentTime = elapsed;
-      }
+      // seek audio — only set currentTime during endScrub, not during drag
+      _pendingSeekTime = elapsed;
       document.getElementById('currentTime').textContent = fmtTime(seconds);
       const rem = Math.floor(totalDur) - seconds;
       document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTime(rem)}`;
@@ -1286,23 +1289,54 @@ body {
       scrubbing = false;
       track.classList.remove('dragging');
       fill.classList.remove('no-transition');
-      if (_audio) {
+      if (_audio && _pendingSeekTime !== null) {
         // temporarily disable onended during seek to prevent false nextSong()
         const savedOnEnded = _audio.onended;
         _audio.onended = null;
-        _audio.onseeked = () => {
-          _isScrubbing = false;
-          _audio.onseeked = null;
-          _audio.onended = savedOnEnded; // restore onended
-          if (isPlaying) _audio.play().catch(() => {});
-        };
-        setTimeout(() => {
-          if (_isScrubbing) {
+
+        function doSeek() {
+          try {
+            _audio.currentTime = _pendingSeekTime;
+          } catch (e) {
+            console.warn('Seek failed:', e);
             _isScrubbing = false;
             _audio.onended = savedOnEnded;
             if (isPlaying) _audio.play().catch(() => {});
+            return;
           }
-        }, 500);
+          _audio.onseeked = () => {
+            _isScrubbing = false;
+            _audio.onseeked = null;
+            _audio.onended = savedOnEnded;
+            if (isPlaying) _audio.play().catch(() => {});
+          };
+          // fallback if onseeked never fires
+          setTimeout(() => {
+            if (_isScrubbing) {
+              _isScrubbing = false;
+              if (_audio) _audio.onended = savedOnEnded;
+              if (isPlaying && _audio) _audio.play().catch(() => {});
+            }
+          }, 800);
+        }
+
+        // If audio metadata not ready yet, wait for it
+        if (_audio.readyState >= 1) {
+          doSeek();
+        } else {
+          _audio.addEventListener('loadedmetadata', () => doSeek(), { once: true });
+          // fallback
+          setTimeout(() => {
+            if (_isScrubbing) {
+              _isScrubbing = false;
+              if (_audio) {
+                _audio.onended = savedOnEnded;
+                if (isPlaying) _audio.play().catch(() => {});
+              }
+            }
+          }, 2000);
+        }
+        _pendingSeekTime = null;
       } else {
         _isScrubbing = false;
       }

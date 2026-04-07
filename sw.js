@@ -11,22 +11,32 @@ self.addEventListener('fetch', event => {
       .replace(/&&/, '&')
       .replace(/[?&]$/, '');
 
+    const rangeHeader = event.request.headers.get('Range');
+
     event.respondWith(
       fetch(cleanUrl, {
         headers: {
           'Authorization': 'Bearer ' + token,
-          // forward Range header so seeking works
-          ...(event.request.headers.get('Range')
-            ? { 'Range': event.request.headers.get('Range') }
-            : {}),
+          ...(rangeHeader ? { 'Range': rangeHeader } : {}),
         },
-        // important: don't follow redirects automatically for range requests
         redirect: 'follow',
       }).then(response => {
-        // pass through the response with CORS headers added
         const headers = new Headers(response.headers);
         headers.set('Access-Control-Allow-Origin', '*');
         headers.set('Accept-Ranges', 'bytes');
+
+        // For range requests: ensure proper 206 response
+        // For full requests: ensure Content-Length is preserved so browser knows duration
+        if (rangeHeader && response.status === 206) {
+          return new Response(response.body, {
+            status: 206,
+            statusText: 'Partial Content',
+            headers,
+          });
+        }
+
+        // If we sent a Range but got 200, the server doesn't support ranges for this file.
+        // Return as-is; the browser will handle it.
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
