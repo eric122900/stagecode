@@ -1672,15 +1672,9 @@ body {
     audioEl.ontimeupdate = () => {
       if (_isScrubbing || _seekLock) return;
       if (!audioEl.duration || isNaN(audioEl.duration)) return;
-      seconds = Math.floor(audioEl.currentTime);
-      progress = (audioEl.currentTime / audioEl.duration) * 100;
-      const fill = document.getElementById('progressFill');
-      const thumb = document.getElementById('progressThumb');
-      if (fill) fill.style.width = progress + '%';
-      if (thumb) thumb.style.left = progress + '%';
-      // Look up pre-decoded LTC at current playback position
+      // LTC and progress are updated in the frame loop (RAF) for smoothness
+      // ontimeupdate is backup + updates minibar
       _ltcDecoded = lookupTC(audioEl.currentTime);
-      updateDisplay();
       updateMiniBar();
     };
     audioEl.onended = () => {
@@ -2101,8 +2095,11 @@ body {
       const elapsed = ts - last;
       const fps = getFpsNominal();
       if (elapsed >= 1000 / fps) {
-        frameCount = (frameCount + 1) % fps;
         last = ts - (elapsed % (1000 / fps));
+        // Update LTC from audio.currentTime every frame for smooth display
+        if (_audio && !_isScrubbing && !_seekLock) {
+          _ltcDecoded = lookupTC(_audio.currentTime);
+        }
         updateFrameDisplay();
       }
       frameRaf = requestAnimationFrame(tick);
@@ -2157,15 +2154,38 @@ body {
     const tcEl = document.getElementById('tcDisplay');
     if (!tcEl) return;
     if (hasLiveTC()) {
-      // Full update from decoded LTC
       const tc = _ltcDecoded;
       const df = tc.dropFrame || isDropFrame();
       const ffSep = df ? ';' : ':';
       const fmt = n => String(n).padStart(2, '0');
       tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
       tcEl.style.opacity = '';
+
+      // Also update progress bar time from audio.currentTime (more accurate than ontimeupdate)
+      if (_audio && _audio.duration && isFinite(_audio.duration) && !_isScrubbing && !_seekLock) {
+        const curTime = _audio.currentTime;
+        seconds = Math.floor(curTime);
+        progress = (curTime / _audio.duration) * 100;
+        const fill = document.getElementById('progressFill');
+        const thumb = document.getElementById('progressThumb');
+        if (fill) fill.style.width = progress + '%';
+        if (thumb) thumb.style.left = progress + '%';
+        document.getElementById('currentTime').textContent = fmtTime(seconds);
+        const totalDur = Math.floor(_audio.duration);
+        const remain = totalDur - seconds;
+        document.getElementById('remainTime').textContent = remain <= 0 ? '0:00' : `-${fmtTime(remain)}`;
+        const mbFill = document.getElementById('miniBarFill');
+        if (mbFill) mbFill.style.width = progress + '%';
+      }
+
+      // Update status dot
+      const dot = document.getElementById('tcDecodingDot');
+      const label = document.getElementById('tcFpsLabel');
+      if (dot && label) {
+        dot.className = 'tc-decoding-dot live';
+        label.textContent = `LTC · ${FPS_PRESETS[projectFpsKey].label} · Decoding`;
+      }
     }
-    // No live TC — leave display as-is (greyed out dashes from updateDisplay)
   }
 
   function updateDisplay() {
