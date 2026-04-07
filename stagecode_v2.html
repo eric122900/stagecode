@@ -1668,6 +1668,11 @@ body {
     return _ltcDecoded !== null;
   }
 
+  // Check if current audio file has LTC data
+  function hasLTCTimeline() {
+    return _ltcTimeline && _ltcTimeline.length > 0;
+  }
+
   // ── Channel routing (mute LTC channel) ──
   let _audioCtx = null;
   let _sourceNode = null;
@@ -2054,20 +2059,35 @@ body {
       progress = pct * 100;
       syncBars(progress);
       _pendingSeekTime = elapsed;
-      document.getElementById('currentTime').textContent = fmtTime(seconds);
-      const rem = Math.floor(totalDur) - seconds;
-      document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTime(rem)}`;
-      _ltcDecoded = lookupTC(elapsed);
-      if (_ltcDecoded) {
+      const isTimeMode = _audio && !hasLTCTimeline();
+      const tcEl = document.getElementById('tcDisplay');
+
+      if (isTimeMode) {
+        // Time mode scrub
+        document.getElementById('currentTime').textContent = fmtTimeHMS(elapsed);
+        const rem = Math.floor(totalDur) - seconds;
+        document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTimeHMS(rem)}`;
         const fmt2 = n => String(n).padStart(2, '0');
-        const tc = _ltcDecoded;
-        const ffSep = (tc.dropFrame || isDropFrame()) ? ';' : ':';
-        document.getElementById('tcDisplay').innerHTML = `${fmt2(tc.hh)}:${fmt2(tc.mm)}<span class="tc-sep">:</span>${fmt2(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt2(tc.ff)}</span>`;
-        document.getElementById('tcDisplay').style.opacity = '';
-        detectCurrentSongByLTC();
+        const h = Math.floor(elapsed / 3600), m = Math.floor((elapsed % 3600) / 60), s = Math.floor(elapsed) % 60;
+        tcEl.innerHTML = `${h > 0 ? fmt2(h) + ':' : ''}${fmt2(m)}<span class="tc-sep">:</span>${fmt2(s)}<span class="tc-ff-part" style="visibility:hidden">:00</span>`;
+        tcEl.style.opacity = '';
       } else {
-        document.getElementById('tcDisplay').innerHTML = `--:--<span class="tc-sep">:</span>--<span class="tc-ff-part">:--</span>`;
-        document.getElementById('tcDisplay').style.opacity = '0.25';
+        // LTC mode scrub
+        document.getElementById('currentTime').textContent = fmtTime(seconds);
+        const rem = Math.floor(totalDur) - seconds;
+        document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTime(rem)}`;
+        _ltcDecoded = lookupTC(elapsed);
+        if (_ltcDecoded) {
+          const fmt2 = n => String(n).padStart(2, '0');
+          const tc = _ltcDecoded;
+          const ffSep = (tc.dropFrame || isDropFrame()) ? ';' : ':';
+          tcEl.innerHTML = `${fmt2(tc.hh)}:${fmt2(tc.mm)}<span class="tc-sep">:</span>${fmt2(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt2(tc.ff)}</span>`;
+          tcEl.style.opacity = '';
+          detectCurrentSongByLTC();
+        } else {
+          tcEl.innerHTML = `--:--<span class="tc-sep">:</span>--<span class="tc-ff-part">:--</span>`;
+          tcEl.style.opacity = '0.25';
+        }
       }
     }
 
@@ -2293,10 +2313,62 @@ body {
     return `${fmt(h)}:${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part">${ffSep}${fmt(f)}</span>`;
   }
 
+  function fmtTimeHMS(totalSec) {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = Math.floor(totalSec) % 60;
+    const fmt = n => String(n).padStart(2, '0');
+    if (h > 0) return `${fmt(h)}:${fmt(m)}:${fmt(s)}`;
+    return `${fmt(m)}:${fmt(s)}`;
+  }
+
   function updateFrameDisplay() {
     const tcEl = document.getElementById('tcDisplay');
     if (!tcEl) return;
-    if (hasLiveTC()) {
+    const isTimeMode = _audio && !hasLTCTimeline();
+
+    if (isTimeMode) {
+      // ── Time mode: no LTC, show file playback time ──
+      if (_audio && _audio.duration && isFinite(_audio.duration) && !_isScrubbing && !_seekLock) {
+        const curTime = _audio.currentTime;
+        seconds = Math.floor(curTime);
+        progress = (curTime / _audio.duration) * 100;
+
+        const h = Math.floor(curTime / 3600);
+        const m = Math.floor((curTime % 3600) / 60);
+        const s = Math.floor(curTime) % 60;
+        const fmt = n => String(n).padStart(2, '0');
+        tcEl.innerHTML = `${h > 0 ? fmt(h) + ':' : ''}${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part" style="visibility:hidden">:00</span>`;
+        tcEl.style.opacity = '';
+
+        const fill = document.getElementById('progressFill');
+        const thumb = document.getElementById('progressThumb');
+        if (fill) fill.style.width = progress + '%';
+        if (thumb) thumb.style.left = progress + '%';
+        document.getElementById('currentTime').textContent = fmtTimeHMS(curTime);
+        const totalDur = Math.floor(_audio.duration);
+        const remain = totalDur - seconds;
+        document.getElementById('remainTime').textContent = remain <= 0 ? '0:00' : `-${fmtTimeHMS(remain)}`;
+        const mbFill = document.getElementById('miniBarFill');
+        if (mbFill) mbFill.style.width = progress + '%';
+        const mbt = document.getElementById('miniBarThumb');
+        if (mbt) mbt.style.left = progress + '%';
+      }
+
+      // Status: Time mode
+      const dot = document.getElementById('tcDecodingDot');
+      const label = document.getElementById('tcFpsLabel');
+      if (dot && label) {
+        dot.className = 'tc-decoding-dot live';
+        label.textContent = 'Time · Playing';
+      }
+      const stcEl = document.getElementById('setlistTcDisplay');
+      if (stcEl && _audio) {
+        stcEl.textContent = fmtTimeHMS(_audio.currentTime);
+        stcEl.classList.add('live');
+      }
+    } else if (hasLiveTC()) {
+      // ── LTC mode ──
       const tc = _ltcDecoded;
       const df = tc.dropFrame || isDropFrame();
       const ffSep = df ? ';' : ':';
@@ -2304,7 +2376,6 @@ body {
       tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
       tcEl.style.opacity = '';
 
-      // Also update progress bar time from audio.currentTime (more accurate than ontimeupdate)
       if (_audio && _audio.duration && isFinite(_audio.duration) && !_isScrubbing && !_seekLock) {
         const curTime = _audio.currentTime;
         seconds = Math.floor(curTime);
@@ -2319,25 +2390,24 @@ body {
         document.getElementById('remainTime').textContent = remain <= 0 ? '0:00' : `-${fmtTime(remain)}`;
         const mbFill = document.getElementById('miniBarFill');
         if (mbFill) mbFill.style.width = progress + '%';
+        const mbt = document.getElementById('miniBarThumb');
+        if (mbt) mbt.style.left = progress + '%';
       }
 
-      // Update status dot
       const dot = document.getElementById('tcDecodingDot');
       const label = document.getElementById('tcFpsLabel');
       if (dot && label) {
         dot.className = 'tc-decoding-dot live';
         label.textContent = `LTC · ${FPS_PRESETS[projectFpsKey].label} · Decoding`;
       }
-
-      // Update setlist TC display
       const stcEl = document.getElementById('setlistTcDisplay');
       if (stcEl) {
+        const fmt = n => String(n).padStart(2, '0');
         const ffSep2 = (tc.dropFrame || isDropFrame()) ? ';' : ':';
         stcEl.textContent = `${fmt(tc.hh)}:${fmt(tc.mm)}:${fmt(tc.ss)}${ffSep2}${fmt(tc.ff)}`;
         stcEl.classList.add('live');
       }
     } else {
-      // No LTC — dim the setlist TC
       const stcEl = document.getElementById('setlistTcDisplay');
       if (stcEl) { stcEl.textContent = '--:--:--:--'; stcEl.classList.remove('live'); }
     }
@@ -2345,16 +2415,26 @@ body {
 
   function updateDisplay() {
     const live = hasLiveTC();
+    const isTimeMode = _audio && !hasLTCTimeline();
     const tcEl = document.getElementById('tcDisplay');
     const fmt = n => String(n).padStart(2, '0');
 
-    if (live) {
+    if (isTimeMode && _audio) {
+      // Time mode display
+      const curTime = _audio.currentTime || 0;
+      const h = Math.floor(curTime / 3600);
+      const m = Math.floor((curTime % 3600) / 60);
+      const s = Math.floor(curTime) % 60;
+      tcEl.innerHTML = `${h > 0 ? fmt(h) + ':' : ''}${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part" style="visibility:hidden">:00</span>`;
+      tcEl.style.opacity = '';
+      const stcEl = document.getElementById('setlistTcDisplay');
+      if (stcEl) { stcEl.textContent = fmtTimeHMS(curTime); stcEl.classList.add('live'); }
+    } else if (live) {
       const tc = _ltcDecoded;
       const df = tc.dropFrame || isDropFrame();
       const ffSep = df ? ';' : ':';
       tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
       tcEl.style.opacity = '';
-      // Sync setlist TC
       const stcEl = document.getElementById('setlistTcDisplay');
       if (stcEl) { stcEl.textContent = `${fmt(tc.hh)}:${fmt(tc.mm)}:${fmt(tc.ss)}${ffSep}${fmt(tc.ff)}`; stcEl.classList.add('live'); }
     } else {
@@ -2369,7 +2449,10 @@ body {
     const label = document.getElementById('tcFpsLabel');
     if (dot && label) {
       const fpsLabel = FPS_PRESETS[projectFpsKey].label;
-      if (live) {
+      if (isTimeMode) {
+        dot.className = 'tc-decoding-dot live';
+        label.textContent = 'Time · Playing';
+      } else if (live) {
         dot.className = 'tc-decoding-dot live';
         label.textContent = `LTC · ${fpsLabel} · Decoding`;
       } else if (_audio) {
