@@ -2462,16 +2462,19 @@ body {
       audioInfo.textContent = '未配對';
     }
 
-    // Build dropdown from loaded Drive files
-    audioSel.innerHTML = '<option value="">— 無（移除配對）—</option>';
-    _driveFiles.forEach(f => {
-      const selected = (s.driveFileId === f.id) ? ' selected' : '';
-      audioSel.innerHTML += `<option value="${f.id}"${selected}>${f.name}</option>`;
+    // Build dropdown from ALL known files: _driveFiles + files referenced by any song
+    const allFiles = new Map();
+    _driveFiles.forEach(f => allFiles.set(f.id, f.name));
+    songs.forEach(song => {
+      if (song.driveFileId && !allFiles.has(song.driveFileId)) {
+        allFiles.set(song.driveFileId, song.driveFileName || song.driveFileId);
+      }
     });
-    // If the song has a file but it's not in _driveFiles (loaded from different folder), add it
-    if (s.driveFileId && !_driveFiles.find(f => f.id === s.driveFileId)) {
-      audioSel.innerHTML += `<option value="${s.driveFileId}" selected>${s.driveFileName || s.driveFileId}</option>`;
-    }
+    audioSel.innerHTML = '<option value="">— 無（移除配對）—</option>';
+    allFiles.forEach((name, id) => {
+      const selected = (s.driveFileId === id) ? ' selected' : '';
+      audioSel.innerHTML += `<option value="${id}"${selected}>${name}</option>`;
+    });
 
     updateFFMax();
     showModal('editModal');
