@@ -2248,7 +2248,15 @@ body {
     }
     updateMiniBar();
   }
-  function skip(sec) { seconds = Math.max(0, seconds + sec); progress = Math.max(0, Math.min(100, progress + (sec / 292 * 100))); updateDisplay(); }
+  function skip(sec) {
+    if (!_audio || !_audio.duration) return;
+    const newTime = Math.max(0, Math.min(_audio.duration, _audio.currentTime + sec));
+    _audio.currentTime = newTime;
+    seconds = Math.floor(newTime);
+    progress = (newTime / _audio.duration) * 100;
+    _ltcDecoded = lookupTC(newTime);
+    updateDisplay();
+  }
 
   function prevSong() {
     const showList = getShowSongs();
