@@ -1041,7 +1041,7 @@ body {
       </div>
       <div class="modal-actions">
         <button class="modal-btn cancel" onclick="closeModal('projectModal')">取消</button>
-        <button class="modal-btn confirm" onclick="saveProject()">建立</button>
+        <button class="modal-btn confirm" id="projectSaveBtn" onclick="saveProject()">建立</button>
       </div>
     </div>
   </div>
@@ -1184,6 +1184,7 @@ body {
           </div>
         </div>
         <div class="project-card-actions">
+          <button class="round-btn" onclick="event.stopPropagation(); editProject(${i})" title="編輯">✎</button>
           <button class="round-btn" onclick="event.stopPropagation(); duplicateProject(${i})" title="複製">⎘</button>
           <button class="round-btn danger" onclick="event.stopPropagation(); deleteProject(${i})" title="刪除">✕</button>
         </div>
@@ -1203,6 +1204,22 @@ body {
 
   let _projectImage = null; // data URL or null
 
+  function editProject(idx) {
+    const p = projects[idx];
+    _editingProjectIdx = idx;
+    _projectEmoji = p.emoji || '🎵';
+    _projectImage = p.image || null;
+    document.getElementById('projectNameInput').value = p.name || '';
+    document.getElementById('projectDateInput').value = p.date || '';
+    document.getElementById('projectModalTitle').textContent = '編輯 Project';
+    document.getElementById('projectSaveBtn').textContent = '儲存';
+    document.querySelectorAll('.emoji-pick').forEach(b => {
+      b.classList.toggle('selected', b.textContent.trim() === _projectEmoji);
+    });
+    updateProjectImgPreview();
+    showModal('projectModal');
+  }
+
   function openNewProjectModal() {
     _editingProjectIdx = null;
     _projectEmoji = '🎵';
@@ -1210,6 +1227,7 @@ body {
     document.getElementById('projectNameInput').value = '';
     document.getElementById('projectDateInput').value = '';
     document.getElementById('projectModalTitle').textContent = '新增 Project';
+    document.getElementById('projectSaveBtn').textContent = '建立';
     document.querySelectorAll('.emoji-pick').forEach(b => b.classList.remove('selected'));
     updateProjectImgPreview();
     showModal('projectModal');
