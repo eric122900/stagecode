@@ -3555,14 +3555,35 @@ body {
       return { song, file: bestScore >= 0.4 ? bestFile : null, score: bestScore, type };
     });
 
+    // ── LTC-based matching for fuzzy/none results ──
+    // For songs without exact match, try finding an audio file whose
+    // decoded LTC timeline contains the song's LTC start point (±1s)
+    _driveMatches.forEach(m => {
+      if (m.type === 'exact') return; // already matched well
+      const songLtcSec = parseLTC(m.song.ltc);
+      let ltcFile = null;
+      _driveFiles.forEach(f => {
+        const tl = _ltcCache.get(f.id);
+        if (!tl || tl.length === 0) return;
+        if (songLtcExistsInTimeline(tl, songLtcSec)) {
+          ltcFile = f;
+        }
+      });
+      if (ltcFile) {
+        m.file = ltcFile;
+        m.type = 'ltc';
+        m.score = 1;
+      }
+    });
+
     // build match review UI
     const list = document.getElementById('driveMatchList');
     const count = document.getElementById('driveMatchCount');
     const matched = _driveMatches.filter(m => m.type !== 'none').length;
     count.textContent = `${matched} / ${_driveMatches.length} 配對`;
 
-    const typeLabel = { exact: '完全配對', fuzzy: '模糊配對', none: '未找到' };
-    const typeCls = { exact: 'match-ok', fuzzy: 'match-fuzzy', none: 'match-none' };
+    const typeLabel = { exact: '完全配對', fuzzy: '模糊配對', ltc: 'LTC 配對', none: '未找到' };
+    const typeCls = { exact: 'match-ok', fuzzy: 'match-fuzzy', ltc: 'match-ok', none: 'match-none' };
 
     list.innerHTML = _driveMatches.map((m, i) => {
       const fileOpts = _driveFiles.map(f =>
