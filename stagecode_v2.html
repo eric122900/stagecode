@@ -1217,6 +1217,9 @@ body {
 
     renderSetlist();
     showScreen('screen-detail');
+
+    // Start background preload if Drive is connected and files are known
+    if (_driveToken && _allDriveFiles.size > 0) bgPreloadAll();
   }
 
   function updateProjectHeaders() {
@@ -2974,6 +2977,9 @@ body {
           <span class="drive-file-name">${f.name}</span>
         </div>`
       ).join('');
+
+      // Start background preload of all files immediately
+      bgPreloadAll();
     } catch(e) {
       list.innerHTML = `<div style="text-align:center;color:#ff5555;font-size:13px;padding:24px;">載入失敗：${e.message}</div>`;
     }
