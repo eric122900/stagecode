@@ -1323,18 +1323,18 @@ body {
       const audioBuf = await ctx.decodeAudioData(arrayBuf);
 
       const ltcChIdx = (_ltcChannel === 'right') ? 1 : 0;
-      if (audioBuf.numberOfChannels <= ltcChIdx) { _ltcTimeline = []; return; }
+      if (audioBuf.numberOfChannels <= ltcChIdx) return [];
 
       const samples = audioBuf.getChannelData(ltcChIdx);
       const sr = audioBuf.sampleRate;
       const rawFrames = decodeLTCFromSamples(samples, sr);
 
-      // ── Strict validation: require consecutive frames with incrementing TC ──
-      _ltcTimeline = validateLTCFrames(rawFrames);
-      console.log(`LTC pre-decode: ${rawFrames.length} raw → ${_ltcTimeline.length} validated frames`);
+      const validated = validateLTCFrames(rawFrames);
+      console.log(`LTC pre-decode: ${rawFrames.length} raw → ${validated.length} validated frames`);
+      return validated;
     } catch (e) {
       console.warn('LTC pre-decode failed:', e);
-      _ltcTimeline = [];
+      return [];
     }
   }
 
@@ -1640,7 +1640,11 @@ body {
       const song = songs[currentSongIdx];
       if (song && song.driveFileId && _blobCache.has(song.driveFileId)) {
         const blobUrl = _blobCache.get(song.driveFileId);
-        fetch(blobUrl).then(r => r.blob()).then(blob => preDecodeLTC(blob));
+        fetch(blobUrl).then(r => r.blob()).then(async blob => {
+          const tl = await preDecodeLTC(blob);
+          _ltcCache.set(song.driveFileId, tl);
+          _ltcTimeline = tl;
+        });
       }
     }
   }
@@ -1701,8 +1705,12 @@ body {
       _playBlobUrl(_blobCache.get(fileId), seekTime);
       if (!_ltcCache.has(fileId)) {
         fetch(_blobCache.get(fileId)).then(r => r.blob()).then(async blob => {
-          await preDecodeLTC(blob);
-          _ltcCache.set(fileId, _ltcTimeline);
+          const tl = await preDecodeLTC(blob);
+          _ltcCache.set(fileId, tl);
+          // Only set active timeline if this file is still playing
+          if (currentSongIdx !== null && songs[currentSongIdx] && songs[currentSongIdx].driveFileId === fileId) {
+            _ltcTimeline = tl;
+          }
           autoMatchMedleySongs(fileId);
           bgPreloadAll();
         });
@@ -1725,20 +1733,19 @@ body {
       const blobUrl = URL.createObjectURL(blob);
       _blobCache.set(fileId, blobUrl);
 
-      await preDecodeLTC(blob);
-      _ltcCache.set(fileId, _ltcTimeline);
+      const tl = await preDecodeLTC(blob);
+      _ltcCache.set(fileId, tl);
 
       if (currentSongIdx !== null && songs[currentSongIdx] && songs[currentSongIdx].driveFileId === fileId) {
-        // Recalculate seekTime now that we have the timeline
+        _ltcTimeline = tl; // set active timeline
         let st = seekTime;
-        if (st == null && _ltcTimeline && _ltcTimeline.length > 0) {
+        if (st == null && tl && tl.length > 0) {
           const songLtcSec = parseLTC(songs[currentSongIdx].ltc);
-          st = ltcToAudioTime(_ltcTimeline, songLtcSec);
+          st = ltcToAudioTime(tl, songLtcSec);
         }
         _playBlobUrl(blobUrl, st);
       }
 
-      // Auto-match medley songs
       autoMatchMedleySongs(fileId);
 
       // Start background pre-load of all other songs' audio files
@@ -1769,7 +1776,7 @@ body {
 
     for (const fid of fileIds) {
       try {
-        // Download blob if not cached
+        let tl;
         if (!_blobCache.has(fid)) {
           if (!_driveToken) continue;
           const apiUrl = `https://www.googleapis.com/drive/v3/files/${fid}?alt=media`;
@@ -1779,19 +1786,16 @@ body {
           if (!resp.ok) { console.warn(`BG: download failed ${fid}`); continue; }
           const blob = await resp.blob();
           _blobCache.set(fid, URL.createObjectURL(blob));
-
-          // Decode LTC
-          await preDecodeLTC(blob);
-          _ltcCache.set(fid, _ltcTimeline);
-          autoMatchMedleySongs(fid);
-          console.log(`BG preload: ${fid} done (${_ltcTimeline ? _ltcTimeline.length : 0} LTC frames)`);
+          tl = await preDecodeLTC(blob);
         } else if (!_ltcCache.has(fid)) {
-          // Blob cached but LTC not decoded yet
           const blob = await fetch(_blobCache.get(fid)).then(r => r.blob());
-          await preDecodeLTC(blob);
-          _ltcCache.set(fid, _ltcTimeline);
+          tl = await preDecodeLTC(blob);
+        }
+        if (tl) {
+          _ltcCache.set(fid, tl);
           autoMatchMedleySongs(fid);
-          console.log(`BG decode: ${fid} done (${_ltcTimeline ? _ltcTimeline.length : 0} LTC frames)`);
+          console.log(`BG preload: ${fid.slice(0,8)}… done (${tl.length} LTC frames)`);
+          // Do NOT touch _ltcTimeline — it belongs to the currently playing song
         }
       } catch (e) {
         console.warn(`BG preload error ${fid}:`, e.message);
