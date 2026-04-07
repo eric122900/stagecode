@@ -1796,25 +1796,28 @@ body {
     });
   }
 
-  // ── Background pre-load: download + decode LTC for ALL songs' audio files ──
+  // ── Background pre-load: download + decode LTC for ALL Drive files ──
   let _bgPreloading = false;
 
   async function bgPreloadAll() {
-    if (_bgPreloading) return; // already running
+    if (_bgPreloading) return;
     _bgPreloading = true;
 
-    // Collect unique fileIds that need downloading/decoding
+    // Collect ALL unique fileIds: from songs + from project's Drive folder files
     const fileIds = new Set();
     songs.forEach(s => {
-      if (s.driveFileId && !_ltcCache.has(s.driveFileId)) {
-        fileIds.add(s.driveFileId);
-      }
+      if (s.driveFileId) fileIds.add(s.driveFileId);
     });
+    // Also include all files in the project's Drive folder (even unmatched ones)
+    _allDriveFiles.forEach((name, id) => fileIds.add(id));
 
-    if (fileIds.size === 0) { _bgPreloading = false; return; }
-    console.log(`BG preload: ${fileIds.size} files to process`);
+    // Filter to only those not yet cached
+    const todo = [...fileIds].filter(fid => !_ltcCache.has(fid));
 
-    for (const fid of fileIds) {
+    if (todo.length === 0) { _bgPreloading = false; return; }
+    console.log(`BG preload: ${todo.length} files to process`);
+
+    for (const fid of todo) {
       try {
         let tl;
         if (!_blobCache.has(fid)) {
@@ -1834,8 +1837,8 @@ body {
         if (tl) {
           _ltcCache.set(fid, tl);
           autoMatchMedleySongs(fid);
-          console.log(`BG preload: ${fid.slice(0,8)}… done (${tl.length} LTC frames)`);
-          // Do NOT touch _ltcTimeline — it belongs to the currently playing song
+          const name = _allDriveFiles.get(fid) || fid.slice(0, 8);
+          console.log(`BG preload: ${name} done (${tl.length} LTC frames)`);
         }
       } catch (e) {
         console.warn(`BG preload error ${fid}:`, e.message);
