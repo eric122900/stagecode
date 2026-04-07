@@ -83,7 +83,7 @@ body {
   }
   .screen { height: 100vh !important; height: 100dvh !important; }
   .screen-header, .detail-header, .player-header { padding-top: calc(env(safe-area-inset-top, 0px) + 16px) !important; }
-  .tab-bar { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px) !important; }
+  .tab-bar { padding-bottom: env(safe-area-inset-bottom, 0px) !important; }
 }
 
 
@@ -134,7 +134,7 @@ body {
 
 .tab-bar {
   display: flex; border-top: 1px solid var(--border);
-  background: var(--bg); padding: 10px 0 22px; flex-shrink: 0;
+  background: var(--bg); padding: 8px 0 8px; flex-shrink: 0;
 }
 .tab-item {
   flex: 1; display: flex; flex-direction: column;
