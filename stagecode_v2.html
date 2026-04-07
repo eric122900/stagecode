@@ -651,6 +651,18 @@ body {
 .match-fuzzy { background: rgba(255,106,26,0.15); color: var(--accent); }
 .match-none { background: var(--surface3); color: var(--muted); }
 .match-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: var(--text); font-family: Nunito,sans-serif; font-size: 12px; width: 100%; margin-top: 4px; }
+
+.fps-select {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-pill); padding: 5px 12px;
+  color: var(--text); font-family: 'Nunito', sans-serif;
+  font-size: 13px; font-weight: 700;
+  cursor: pointer; -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23b3b3b3' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+  padding-right: 28px;
+}
+.fps-select:focus { outline: none; border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -764,6 +776,22 @@ body {
         </div>
       </div>
     </div>
+    <div class="info-cards" style="padding-top:0;">
+      <div class="info-card" style="cursor:default;">
+        <div class="info-card-icon">⏱</div>
+        <div class="info-card-text" style="flex:1;">
+          <div class="info-card-label">Frame Rate</div>
+          <select id="fpsSelect" class="fps-select" onchange="setProjectFps(this.value)">
+            <option value="23.976">23.976 fps</option>
+            <option value="24">24 fps</option>
+            <option value="25">25 fps</option>
+            <option value="29.97df">29.97 DF</option>
+            <option value="29.97">29.97 NDF</option>
+            <option value="30" selected>30 fps</option>
+          </select>
+        </div>
+      </div>
+    </div>
     <div class="setlist-area" id="setlistArea"></div>
     <!-- Mini Player Bar -->
     <div class="mini-player-bar" id="miniPlayerBar" onclick="showPlayer()">
@@ -811,7 +839,7 @@ body {
     <div class="tc-area">
       <div class="tc-label-row">
         <div class="tc-decoding-dot"></div>
-        LTC · 29.97 fps · Decoding
+        <span id="tcFpsLabel">LTC · 30 fps · Decoding</span>
       </div>
       <div class="tc-main tc-running" id="tcDisplay">
         01:00<span class="tc-sep">:</span>00<span class="tc-ff-part">:00</span>
@@ -1023,10 +1051,62 @@ body {
 
   const songs = [];
 
+  // ── FPS configuration ──
+  const FPS_PRESETS = {
+    '23.976': { label: '23.976 fps', nominal: 24, actual: 23.976, drop: false },
+    '24':     { label: '24 fps',     nominal: 24, actual: 24,     drop: false },
+    '25':     { label: '25 fps',     nominal: 25, actual: 25,     drop: false },
+    '29.97df':{ label: '29.97 DF',   nominal: 30, actual: 29.97,  drop: true  },
+    '29.97':  { label: '29.97 NDF',  nominal: 30, actual: 29.97,  drop: false },
+    '30':     { label: '30 fps',     nominal: 30, actual: 30,     drop: false },
+  };
+  let projectFpsKey = '30'; // default
+
+  function getFps() { return FPS_PRESETS[projectFpsKey]; }
+  function getFpsNominal() { return getFps().nominal; }
+  function isDropFrame() { return getFps().drop; }
+
+  function setProjectFps(key) {
+    if (!FPS_PRESETS[key]) return;
+    projectFpsKey = key;
+    const labelEl = document.getElementById('tcFpsLabel');
+    if (labelEl) labelEl.textContent = `LTC · ${FPS_PRESETS[key].label} · Decoding`;
+    const sel = document.getElementById('fpsSelect');
+    if (sel) sel.value = key;
+    if (currentSongIdx !== null) updateDisplay();
+  }
+
   function parseLTC(ltc) {
     // "HH:MM:SS:FF" → total seconds (ignore frames)
     const p = ltc.split(':').map(Number);
-    return p[0] * 3600 + p[1] * 60 + p[2];
+    let totalSec = p[0] * 3600 + p[1] * 60 + p[2];
+    if (isDropFrame() && p.length >= 4) {
+      const totalFrames = dfToFrameCount(p[0], p[1], p[2], p[3]);
+      totalSec = Math.floor(totalFrames / 29.97);
+    }
+    return totalSec;
+  }
+
+  // Convert drop-frame timecode to absolute frame count
+  function dfToFrameCount(hh, mm, ss, ff) {
+    const totalMinutes = hh * 60 + mm;
+    const dropEvents = totalMinutes - Math.floor(totalMinutes / 10);
+    return (hh * 3600 + mm * 60 + ss) * 30 + ff - dropEvents * 2;
+  }
+
+  // Convert absolute frame count to drop-frame timecode
+  function framesToDF(totalFrames) {
+    const D = Math.floor(totalFrames / 17982);
+    const M = totalFrames % 17982;
+    let addFrames;
+    if (M < 2) { addFrames = 0; }
+    else { addFrames = Math.floor((M - 2) / 1798) * 2 + 2; }
+    const adjusted = totalFrames + 18 * D + addFrames;
+    const ff = adjusted % 30;
+    const ss = Math.floor(adjusted / 30) % 60;
+    const mm = Math.floor(adjusted / 1800) % 60;
+    const hh = Math.floor(adjusted / 108000);
+    return { hh, mm, ss, ff };
   }
 
   function getShowSongs() {
@@ -1291,9 +1371,10 @@ body {
       if (!isPlaying) { frameRaf = requestAnimationFrame(tick); return; }
       if (last === null) last = ts;
       const elapsed = ts - last;
-      if (elapsed >= 1000 / FPS) {
-        frameCount = (frameCount + 1) % FPS;
-        last = ts - (elapsed % (1000 / FPS));
+      const fps = getFpsNominal();
+      if (elapsed >= 1000 / fps) {
+        frameCount = (frameCount + 1) % fps;
+        last = ts - (elapsed % (1000 / fps));
         updateFrameDisplay();
       }
       frameRaf = requestAnimationFrame(tick);
@@ -1311,7 +1392,16 @@ body {
     tcInterval = setInterval(() => {
       if (!isPlaying) return;
       seconds++;
-      frameCount = 0; // reset frame at each new second
+      frameCount = 0;
+      // Drop-frame: skip frames 0,1 at start of each minute except every 10th
+      if (isDropFrame()) {
+        const rt = getReelTime();
+        const ss = rt % 60;
+        const mm = Math.floor(rt / 60) % 60;
+        if (ss === 0 && (mm % 10) !== 0) {
+          frameCount = 2;
+        }
+      }
       progress = seconds / SONG_DURATION * 100;
       updateDisplay();
       if (seconds >= SONG_DURATION) {
@@ -1321,7 +1411,6 @@ body {
     }, 1000);
   }
   function stopTC() { clearInterval(tcInterval); tcInterval = null; stopFrameLoop(); frameCount = 0; }
-  const FPS = 25; // LTC frame rate
   let frameCount = 0; // running frame counter within current second
   let frameRaf = null;
   const SONG_DURATION = 292; // seconds — total song length
@@ -1332,7 +1421,8 @@ body {
   function buildTCHTML(rt, f) {
     const h = Math.floor(rt / 3600), m = Math.floor((rt % 3600) / 60), s = rt % 60;
     const fmt = n => String(n).padStart(2, '0');
-    return `${fmt(h)}:${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part">:${fmt(f)}</span>`;
+    const ffSep = isDropFrame() ? ';' : ':';
+    return `${fmt(h)}:${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part">${ffSep}${fmt(f)}</span>`;
   }
 
   function updateFrameDisplay() {
@@ -1340,7 +1430,8 @@ body {
     const tcEl = document.getElementById('tcDisplay');
     if (!tcEl) return;
     const ffSpan = tcEl.querySelector('.tc-ff-part');
-    if (ffSpan) ffSpan.textContent = ':' + String(frameCount).padStart(2, '0');
+    const ffSep = isDropFrame() ? ';' : ':';
+    if (ffSpan) ffSpan.textContent = ffSep + String(frameCount).padStart(2, '0');
   }
 
   function updateDisplay() {
@@ -1480,7 +1571,13 @@ body {
     // show position block & section selector
     document.getElementById('addPositionBlock').style.display = 'block';
     editSetSection(section);
+    updateFFMax();
     showModal('editModal');
+  }
+
+  function updateFFMax() {
+    const ffInput = document.getElementById('tcFF');
+    if (ffInput) ffInput.max = getFpsNominal() - 1;
   }
 
   function openEditModalIdx(i) {
@@ -1496,6 +1593,7 @@ body {
     document.getElementById('editModalTitle').textContent = '編輯歌曲';
     document.getElementById('editModalSaveBtn').textContent = '儲存';
     document.getElementById('addPositionBlock').style.display = 'none';
+    updateFFMax();
     showModal('editModal');
   }
 
