@@ -1999,6 +1999,8 @@ body {
         const ffSep = (tc.dropFrame || isDropFrame()) ? ';' : ':';
         document.getElementById('tcDisplay').innerHTML = `${fmt2(tc.hh)}:${fmt2(tc.mm)}<span class="tc-sep">:</span>${fmt2(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt2(tc.ff)}</span>`;
         document.getElementById('tcDisplay').style.opacity = '';
+        // Track which song we're scrubbing into
+        detectCurrentSongByLTC();
       } else {
         document.getElementById('tcDisplay').innerHTML = `--:--<span class="tc-sep">:</span>--<span class="tc-ff-part">:--</span>`;
         document.getElementById('tcDisplay').style.opacity = '0.25';
@@ -2140,6 +2142,37 @@ body {
     return parseLTC(songs[currentSongIdx].ltc) + seconds;
   }
 
+  // Find which song the current LTC time belongs to (for medley tracking)
+  function detectCurrentSongByLTC() {
+    if (!_ltcDecoded || !songs.length) return;
+    const curSec = _ltcDecoded.hh * 3600 + _ltcDecoded.mm * 60 + _ltcDecoded.ss;
+    const curFileId = currentSongIdx !== null ? songs[currentSongIdx]?.driveFileId : null;
+
+    // Find the song whose LTC start is closest to (but not exceeding) current LTC
+    // Only consider songs sharing the same audio file
+    let bestIdx = -1;
+    let bestDiff = Infinity;
+    songs.forEach((s, i) => {
+      if (!curFileId || s.driveFileId !== curFileId) return;
+      const songSec = parseLTC(s.ltc);
+      const diff = curSec - songSec;
+      if (diff >= 0 && diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    });
+
+    if (bestIdx >= 0 && bestIdx !== currentSongIdx) {
+      currentSongIdx = bestIdx;
+      updatePlayerHeader();
+      updateMiniHighlight();
+      renderSetlist();
+      updateMiniBar();
+    }
+  }
+
+  let _detectThrottle = 0; // throttle song detection to ~4Hz
+
   function startFrameLoop() {
     let last = null;
     function tick(ts) {
@@ -2152,6 +2185,12 @@ body {
         // Update LTC from audio.currentTime every frame for smooth display
         if (_audio && !_isScrubbing && !_seekLock) {
           _ltcDecoded = lookupTC(_audio.currentTime);
+          // Detect song change by LTC (~4 times per second to save CPU)
+          _detectThrottle++;
+          if (_detectThrottle >= Math.floor(fps / 4)) {
+            _detectThrottle = 0;
+            detectCurrentSongByLTC();
+          }
         }
         updateFrameDisplay();
       }
