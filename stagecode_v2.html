@@ -1099,14 +1099,15 @@ body {
     _audio.preload = 'none';
     _audio.play().catch(e => {
       console.warn('串流失敗，嘗試備用方式:', e);
-      // fallback: public download URL
       const fallbackUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
       _audio = new Audio(fallbackUrl);
       _audio.play().catch(e2 => {
         console.warn('備用方式也失敗:', e2);
-        startTC(); // 回到模擬模式
+        startTC();
       });
     });
+    // audio drives progress — stop timer-based TC
+    stopTC();
     _audio.ontimeupdate = () => {
       if (!_audio || !_audio.duration) return;
       seconds = Math.floor(_audio.currentTime);
@@ -1157,22 +1158,22 @@ body {
     }
 
     function applyPercent(pct) {
+      const totalDur = (_audio && _audio.duration) ? _audio.duration : SONG_DURATION;
+      const elapsed = pct * totalDur;
+      seconds = Math.floor(elapsed);
       progress = pct * 100;
-      seconds  = Math.round(pct * 292);
       fill.classList.add('no-transition');
       fill.style.width = progress + '%';
       const th = document.getElementById('progressThumb');
       if (th) th.style.left = progress + '%';
-      const fmt = n => String(n).padStart(2,'0');
-      const m = Math.floor(seconds / 60), s = seconds % 60;
-      const elapsed = Math.round(pct * SONG_DURATION);
-      seconds = elapsed;
-      // reelTime = this song's LTC start + how far we've scrubbed into it
-      document.getElementById('currentTime').textContent = fmtTime(elapsed);
-      const rem = SONG_DURATION - elapsed;
+      // seek audio
+      if (_audio && _audio.duration && !isNaN(elapsed)) {
+        _audio.currentTime = elapsed;
+      }
+      document.getElementById('currentTime').textContent = fmtTime(seconds);
+      const rem = Math.floor(totalDur) - seconds;
       document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTime(rem)}`;
-      // LTC = this song's start + scrubbed seconds
-      const rt2 = parseLTC(songs[currentSongIdx].ltc) + elapsed;
+      const rt2 = parseLTC(songs[currentSongIdx].ltc) + seconds;
       document.getElementById('tcDisplay').innerHTML = buildTCHTML(rt2, frameCount);
     }
 
@@ -1316,7 +1317,8 @@ body {
     document.getElementById('tcDisplay').innerHTML = buildTCHTML(rt, frameCount);
     // elapsed & remaining
     document.getElementById('currentTime').textContent = fmtTime(seconds);
-    const remain = SONG_DURATION - seconds;
+    const totalDur = (_audio && _audio.duration) ? Math.floor(_audio.duration) : SONG_DURATION;
+    const remain = totalDur - seconds;
     document.getElementById('remainTime').textContent = remain <= 0 ? '0:00' : `-${fmtTime(remain)}`;
     const fill = document.getElementById('progressFill');
     fill.style.width = progress + '%';
