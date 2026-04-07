@@ -3148,13 +3148,37 @@ body {
       list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">沒有音檔，請載入資料夾</div>';
       return;
     }
-    const sorted = [..._driveFiles].sort((a, b) => a.name.localeCompare(b.name));
-    list.innerHTML = sorted.map(f =>
-      `<div class="drive-file-row">
-        <span class="drive-file-icon">🎵</span>
-        <span class="drive-file-name">${f.name}</span>
-      </div>`
-    ).join('');
+    const p = currentProject();
+    const folders = (p && p.driveFolders) || [];
+
+    // Group files by folderId, then sort each group alphabetically
+    const groups = new Map();
+    _driveFiles.forEach(f => {
+      const fid = f.folderId || 'unknown';
+      if (!groups.has(fid)) groups.set(fid, []);
+      groups.get(fid).push(f);
+    });
+    groups.forEach(files => files.sort((a, b) => a.name.localeCompare(b.name)));
+
+    // Render grouped by folder
+    let html = '';
+    // Order groups by folder order in driveFolders
+    const folderOrder = folders.map(f => f.id);
+    // Add any unknown groups at the end
+    groups.forEach((_, fid) => { if (!folderOrder.includes(fid)) folderOrder.push(fid); });
+
+    folderOrder.forEach(fid => {
+      const files = groups.get(fid);
+      if (!files || !files.length) return;
+      html += `<div style="font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:8px 4px 4px;margin-top:4px;">📁 ${fid.slice(0, 20)}… · ${files.length} files</div>`;
+      html += files.map(f =>
+        `<div class="drive-file-row">
+          <span class="drive-file-icon">🎵</span>
+          <span class="drive-file-name">${f.name}</span>
+        </div>`
+      ).join('');
+    });
+    list.innerHTML = html;
   }
 
   function driveSignIn() {
