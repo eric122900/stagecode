@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://apis.google.com/js/api.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW:', e));
+  }
+</script>
 <script src="https://accounts.google.com/gsi/client"></script>
 <title>STAGECODE — Concert PGM Tool</title>
 <style>
@@ -1108,23 +1113,15 @@ body {
   function playDriveAudio(fileId) {
     stopAudio();
     if (!fileId || !_driveToken) return;
-    const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${_driveToken}`;
+    // Service Worker intercepts this URL and adds Authorization header
+    const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&sw_token=${_driveToken}`;
     _audio = new Audio(streamUrl);
     attachAudioEvents(_audio);
     const playPromise = _audio.play();
     if (playPromise !== undefined) {
       playPromise.catch(e => {
-        console.warn('API 串流失敗:', e.message);
-        // fallback to public URL
-        stopAudio();
-        const fallbackUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-        _audio = new Audio(fallbackUrl);
-        attachAudioEvents(_audio);
-        _audio.play().catch(e2 => {
-          console.warn('備用方式也失敗:', e2.message);
-          _audio = null;
-          startTC();
-        });
+        console.warn('SW 串流失敗:', e.message);
+        startTC();
       });
     }
   }
