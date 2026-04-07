@@ -1587,7 +1587,6 @@ body {
     };
     audioEl.onerror = (e) => {
       console.warn('音檔錯誤:', e);
-      startTC();
     };
   }
 
@@ -1604,7 +1603,6 @@ body {
     // Download entire file as blob first, then play locally
     // This guarantees seek always works
     const apiUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    startTC(); // show TC ticking while downloading
 
     fetch(apiUrl, {
       headers: { 'Authorization': 'Bearer ' + _driveToken },
@@ -1618,13 +1616,11 @@ body {
       _blobCache.set(fileId, blobUrl);
       // Only play if this song is still the current one
       if (currentSongIdx !== null && songs[currentSongIdx] && songs[currentSongIdx].driveFileId === fileId) {
-        stopTC();
         _playBlobUrl(blobUrl);
       }
     })
     .catch(e => {
       console.warn('Drive 下載失敗:', e.message);
-      // TC is already running as fallback
     });
   }
 
@@ -1637,7 +1633,6 @@ body {
     if (playPromise !== undefined) {
       playPromise.catch(e => {
         console.warn('播放失敗:', e.message);
-        startTC();
       });
     }
   }
@@ -1655,13 +1650,12 @@ body {
     stopTC();
     stopFrameLoop();
     stopAudio();
-    startFrameLoop();
     const song = songs[globalIdx];
     if (song && song.driveFileId && _driveToken) {
       playDriveAudio(song.driveFileId);
-    } else {
-      startTC();
+      startFrameLoop();
     }
+    // No audio = no playback, TC stays in standby
     updateDisplay();
     updateMiniBar();
   }
@@ -1769,12 +1763,11 @@ body {
   function showPlayer(globalIdx) {
     if (globalIdx !== undefined) currentSongIdx = globalIdx;
     ensureCurrentIdx();
-    // init reelTime from current song's LTC start if not yet running
     showScreen('screen-player');
     updatePlayerHeader();
     buildMiniList();
     updateMiniHighlight();
-    if (!tcInterval) startTC();
+    updateDisplay();
   }
 
   const pauseSVG = `<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>`;
@@ -1803,20 +1796,19 @@ body {
   }
 
   function togglePlay() {
+    if (!_audio) return; // nothing to play without audio
     isPlaying = !isPlaying;
     document.getElementById('playIcon').innerHTML = isPlaying ? pauseSVG : playSVG;
     const tc = document.getElementById('tcDisplay');
     if (isPlaying) {
       tc.classList.remove('tc-paused');
       tc.classList.add('tc-running');
-      if (_audio) _audio.play();
-      else startTC();
+      _audio.play();
       startFrameLoop();
     } else {
       tc.classList.remove('tc-running');
       tc.classList.add('tc-paused');
-      if (_audio) _audio.pause();
-      else stopTC();
+      _audio.pause();
       stopFrameLoop();
     }
     updateMiniBar();
@@ -1900,26 +1892,28 @@ body {
       const ffSep = df ? ';' : ':';
       const fmt = n => String(n).padStart(2, '0');
       tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
-      return;
+      tcEl.style.opacity = '';
     }
-    // Fallback: only update the FF part
-    const ffSpan = tcEl.querySelector('.tc-ff-part');
-    const ffSep = isDropFrame() ? ';' : ':';
-    if (ffSpan) ffSpan.textContent = ffSep + String(frameCount).padStart(2, '0');
+    // No live TC — leave display as-is (greyed out dashes from updateDisplay)
   }
 
   function updateDisplay() {
     const live = hasLiveTC();
-    const rt = getReelTime();
+    const tcEl = document.getElementById('tcDisplay');
     const fmt = n => String(n).padStart(2, '0');
+
     if (live) {
       const tc = _ltcDecoded;
       const df = tc.dropFrame || isDropFrame();
       const ffSep = df ? ';' : ':';
-      document.getElementById('tcDisplay').innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
+      tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
+      tcEl.style.opacity = '';
     } else {
-      document.getElementById('tcDisplay').innerHTML = buildTCHTML(rt, frameCount);
+      // No live LTC — show dashes, greyed out
+      tcEl.innerHTML = `--:--<span class="tc-sep">:</span>--<span class="tc-ff-part">:--</span>`;
+      tcEl.style.opacity = '0.25';
     }
+
     // Update decoding status indicator
     const dot = document.getElementById('tcDecodingDot');
     const label = document.getElementById('tcFpsLabel');
@@ -1933,21 +1927,30 @@ body {
         label.textContent = `LTC · ${fpsLabel} · No Signal`;
       } else {
         dot.className = 'tc-decoding-dot no-signal';
-        label.textContent = `LTC · ${fpsLabel} · Simulated`;
+        label.textContent = `LTC · ${fpsLabel} · Standby`;
       }
     }
-    // elapsed & remaining
-    document.getElementById('currentTime').textContent = fmtTime(seconds);
-    const totalDur = (_audio && _audio.duration) ? Math.floor(_audio.duration) : SONG_DURATION;
-    const remain = totalDur - seconds;
-    document.getElementById('remainTime').textContent = remain <= 0 ? '0:00' : `-${fmtTime(remain)}`;
-    const fill = document.getElementById('progressFill');
-    fill.style.width = progress + '%';
-    const thumb = document.getElementById('progressThumb');
-    if (thumb) thumb.style.left = progress + '%';
-    // sync mini bar progress
-    const mbFill = document.getElementById('miniBarFill');
-    if (mbFill) mbFill.style.width = progress + '%';
+
+    // elapsed & remaining (only meaningful when audio is playing)
+    if (_audio && _audio.duration && isFinite(_audio.duration)) {
+      document.getElementById('currentTime').textContent = fmtTime(seconds);
+      const totalDur = Math.floor(_audio.duration);
+      const remain = totalDur - seconds;
+      document.getElementById('remainTime').textContent = remain <= 0 ? '0:00' : `-${fmtTime(remain)}`;
+      const fill = document.getElementById('progressFill');
+      fill.style.width = progress + '%';
+      const thumb = document.getElementById('progressThumb');
+      if (thumb) thumb.style.left = progress + '%';
+      const mbFill = document.getElementById('miniBarFill');
+      if (mbFill) mbFill.style.width = progress + '%';
+    } else {
+      document.getElementById('currentTime').textContent = '--:--';
+      document.getElementById('remainTime').textContent = '--:--';
+      const fill = document.getElementById('progressFill');
+      fill.style.width = '0%';
+      const thumb = document.getElementById('progressThumb');
+      if (thumb) thumb.style.left = '0%';
+    }
     updateMiniBar();
   }
   function skip(sec) { seconds = Math.max(0, seconds + sec); progress = Math.max(0, Math.min(100, progress + (sec / 292 * 100))); updateDisplay(); }
