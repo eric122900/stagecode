@@ -3099,72 +3099,103 @@ body {
     closeModal('pdfModal');
     const p = currentProject();
     const projectName = p ? p.name : 'Setlist';
+    const projectDate = p ? (p.date || '') : '';
 
-    // Header row
-    const ws_data = [['#', 'TITLE', 'LTC', 'SECTION', 'AUDIO FILE']];
-
-    // Show songs first (in order), then Other songs
     const showSongs = songs.filter(s => s.section === 'show');
     const otherSongs = songs.filter(s => s.section === 'other');
     const ordered = [...showSongs, ...otherSongs];
-
-    let showIdx = 0;
-    ordered.forEach(s => {
-      const num = s.section === 'show' ? String(++showIdx).padStart(2, '0') : '—';
-      ws_data.push([num, s.title, s.ltc, s.section.toUpperCase(), s.driveFileName || '']);
-    });
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(ws_data);
-
-    // Column widths
-    ws['!cols'] = [{wch:5}, {wch:36}, {wch:14}, {wch:8}, {wch:40}];
-
-    // ── Styling ──
-    // Header row: bold white on dark
-    const headerFill = { fgColor: { rgb: 'FF1E1E1E' } };
-    const headerFont = { bold: true, color: { rgb: 'FFFFFFFF' }, sz: 11 };
-    for (let c = 0; c < 5; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
-      if (cell) {
-        cell.s = { fill: headerFill, font: headerFont, alignment: { vertical: 'center' } };
-      }
-    }
-
-    // Data rows: highlight VCR/Video rows
     const vcrPattern = /\b(vcr|video|interlude)\b/i;
-    const vcrFill = { fgColor: { rgb: 'FF2D2D2D' } };
-    const vcrFont = { color: { rgb: 'FFFF6A1A' }, bold: true, sz: 11 };
-    const normalFont = { color: { rgb: 'FFFFFFFF' }, sz: 11 };
-    const normalFill = { fgColor: { rgb: 'FF121212' } };
-    const ltcFont = { color: { rgb: 'FFB3B3B3' }, sz: 11, name: 'Consolas' };
 
-    for (let r = 1; r < ws_data.length; r++) {
-      const title = ws_data[r][1] || '';
-      const isVCR = vcrPattern.test(title);
-      for (let c = 0; c < 5; c++) {
-        const cell = ws[XLSX.utils.encode_cell({ r, c })];
-        if (!cell) continue;
-        if (isVCR) {
-          cell.s = {
-            fill: vcrFill,
-            font: c === 2 ? { ...vcrFont, name: 'Consolas' } : vcrFont,
-            alignment: { vertical: 'center' },
-          };
-        } else {
-          cell.s = {
-            fill: normalFill,
-            font: c === 2 ? ltcFont : normalFont,
-            alignment: { vertical: 'center' },
-          };
-        }
-      }
+    // ── Build styled HTML table for Excel ──
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8">
+<style>
+  td, th { font-family: 'Calibri', sans-serif; font-size: 11pt; vertical-align: middle; padding: 6px 10px; }
+  .header { background: #1a1a1a; color: #ffffff; font-weight: 700; font-size: 12pt; border-bottom: 2px solid #ff6a1a; }
+  .title-row { background: #0d0d0d; color: #ffffff; font-size: 18pt; font-weight: 900; padding: 14px 10px; }
+  .subtitle { background: #0d0d0d; color: #888888; font-size: 10pt; padding: 4px 10px 14px; }
+  .normal { background: #121212; color: #e0e0e0; border-bottom: 1px solid #2a2a2a; }
+  .vcr { background: #1c1008; color: #ff6a1a; font-weight: 700; border-bottom: 1px solid #2a2a2a; }
+  .num { text-align: center; color: #666666; font-weight: 700; width: 40px; }
+  .num-vcr { text-align: center; color: #ff6a1a; font-weight: 700; width: 40px; }
+  .ltc { font-family: 'Consolas', 'Courier New', monospace; color: #999999; letter-spacing: 0.5px; }
+  .ltc-vcr { font-family: 'Consolas', 'Courier New', monospace; color: #ff6a1a; letter-spacing: 0.5px; }
+  .section { text-align: center; font-size: 9pt; font-weight: 700; text-transform: uppercase; }
+  .section-show { color: #ff6a1a; }
+  .section-other { color: #666666; }
+  .audio { color: #666666; font-size: 9pt; }
+  .separator { background: #1a1a1a; color: #ff6a1a; font-weight: 800; font-size: 10pt; letter-spacing: 2px; padding: 10px; border-top: 2px solid #333333; }
+  .color-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+</style></head><body>
+<table border="0" cellpadding="0" cellspacing="0" width="800">`;
+
+    // Project title
+    html += `<tr><td colspan="5" class="title-row">▸ ${projectName}</td></tr>`;
+    if (projectDate) {
+      html += `<tr><td colspan="5" class="subtitle">${projectDate}</td></tr>`;
     }
 
-    XLSX.utils.book_append_sheet(wb, ws, 'Setlist');
-    // Use project name for filename
+    // Header
+    html += `<tr>
+      <th class="header">#</th>
+      <th class="header" style="text-align:left;">TITLE</th>
+      <th class="header">LTC</th>
+      <th class="header">SECTION</th>
+      <th class="header" style="text-align:left;">AUDIO FILE</th>
+    </tr>`;
+
+    // SHOW section
+    if (showSongs.length) {
+      html += `<tr><td colspan="5" class="separator">▸ SHOW · ${showSongs.length} SONGS</td></tr>`;
+      showSongs.forEach((s, i) => {
+        const isVCR = vcrPattern.test(s.title);
+        const cls = isVCR ? 'vcr' : 'normal';
+        const numCls = isVCR ? 'num-vcr' : 'num';
+        const ltcCls = isVCR ? 'ltc-vcr' : 'ltc';
+        const colorDot = s.color ? `<span class="color-dot" style="background:${s.color};"></span>` : '';
+        html += `<tr>
+          <td class="${cls} ${numCls}">${String(i + 1).padStart(2, '0')}</td>
+          <td class="${cls}">${colorDot}${s.title}</td>
+          <td class="${cls} ${ltcCls}">${s.ltc}</td>
+          <td class="${cls} section section-show">SHOW</td>
+          <td class="${cls} audio">${s.driveFileName || ''}</td>
+        </tr>`;
+      });
+    }
+
+    // OTHER section
+    if (otherSongs.length) {
+      html += `<tr><td colspan="5" class="separator">▸ OTHER · ${otherSongs.length} SONGS</td></tr>`;
+      otherSongs.forEach(s => {
+        const isVCR = vcrPattern.test(s.title);
+        const cls = isVCR ? 'vcr' : 'normal';
+        const ltcCls = isVCR ? 'ltc-vcr' : 'ltc';
+        html += `<tr>
+          <td class="${cls} num">—</td>
+          <td class="${cls}">${s.title}</td>
+          <td class="${cls} ${ltcCls}">${s.ltc}</td>
+          <td class="${cls} section section-other">OTHER</td>
+          <td class="${cls} audio">${s.driveFileName || ''}</td>
+        </tr>`;
+      });
+    }
+
+    // Footer
+    html += `<tr><td colspan="5" style="background:#0d0d0d;color:#444444;font-size:9pt;padding:12px 10px;">
+      Generated by STAGECODE · ${new Date().toLocaleDateString('zh-TW')}
+    </td></tr>`;
+
+    html += '</table></body></html>';
+
+    // Download as .xls (Excel opens HTML tables natively with styles)
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
     const safeName = projectName.replace(/[^a-zA-Z0-9\u4e00-\u9fff _-]/g, '').trim() || 'Setlist';
-    XLSX.writeFile(wb, `${safeName}_Setlist.xlsx`);
+    a.href = url;
+    a.download = `${safeName}_Setlist.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // import batch state
