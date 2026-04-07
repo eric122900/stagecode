@@ -677,9 +677,10 @@ body {
 
 .setlist-tc-card {
   background: var(--surface) !important; justify-content: center;
+  min-width: 0 !important; flex: 1 1 0 !important;
 }
 .setlist-tc-display {
-  font-family: 'DM Mono', monospace; font-size: 18px; font-weight: 500;
+  font-family: 'DM Mono', monospace; font-size: 17px; font-weight: 500;
   color: var(--accent); letter-spacing: 0.5px;
   font-variant-numeric: tabular-nums; white-space: nowrap;
   text-align: center; width: 100%;
@@ -757,9 +758,9 @@ body {
       </div>
     </div>
     <div class="info-cards" style="padding-top:0;">
-      <div class="info-card" style="cursor:default;">
+      <div class="info-card" style="cursor:default;flex:1 1 0;min-width:0;">
         <div class="info-card-icon">⏱</div>
-        <div class="info-card-text" style="flex:1;">
+        <div class="info-card-text">
           <div class="info-card-label">Frame Rate</div>
           <select id="fpsSelect" class="fps-select" onchange="setProjectFps(this.value)">
             <option value="23.976">23.976 fps</option>
@@ -2795,6 +2796,35 @@ body {
   let _driveFiles = []; // { id, name } from loaded folder
   let _driveMatches = []; // { song, file, type, selected }
 
+  // ── Google token persistence ──
+  function saveDriveToken(token, expiresIn) {
+    const expiry = Date.now() + (expiresIn || 3600) * 1000;
+    try {
+      localStorage.setItem('stagecode_drive_token', token);
+      localStorage.setItem('stagecode_drive_expiry', String(expiry));
+    } catch(e) {}
+  }
+
+  function loadDriveToken() {
+    try {
+      const token = localStorage.getItem('stagecode_drive_token');
+      const expiry = parseInt(localStorage.getItem('stagecode_drive_expiry') || '0');
+      if (token && expiry > Date.now()) {
+        _driveToken = token;
+        document.getElementById('driveStatus').textContent = '已連結';
+        document.getElementById('driveStatus').style.color = 'var(--accent)';
+        return true;
+      }
+      // expired — clear
+      localStorage.removeItem('stagecode_drive_token');
+      localStorage.removeItem('stagecode_drive_expiry');
+    } catch(e) {}
+    return false;
+  }
+
+  // Try restoring token on page load
+  loadDriveToken();
+
   function driveCardClick() {
     if (_driveToken) { showModal('driveModal'); return; }
     driveSignIn();
@@ -2807,6 +2837,7 @@ body {
       callback: (resp) => {
         if (resp.error) { alert('Google 登入失敗：' + resp.error); return; }
         _driveToken = resp.access_token;
+        saveDriveToken(resp.access_token, resp.expires_in);
         document.getElementById('driveStatus').textContent = '已連結';
         document.getElementById('driveStatus').style.color = 'var(--accent)';
         showModal('driveModal');
