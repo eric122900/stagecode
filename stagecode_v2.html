@@ -652,6 +652,15 @@ body {
 .match-none { background: var(--surface3); color: var(--muted); }
 .match-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: var(--text); font-family: Nunito,sans-serif; font-size: 12px; width: 100%; margin-top: 4px; }
 
+.emoji-pick {
+  width: 40px; height: 40px; border-radius: var(--radius);
+  border: 2px solid var(--border); background: var(--surface2);
+  font-size: 20px; cursor: pointer; transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.emoji-pick:hover { border-color: var(--text2); }
+.emoji-pick.selected { border-color: var(--accent); background: var(--accent-dim); }
+
 .fps-select {
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: var(--radius-pill); padding: 5px 12px;
@@ -676,52 +685,9 @@ body {
   <div class="screen active" id="screen-projects">
     <div class="screen-header">
       <div class="screen-title">STAGECODE</div>
-      <button class="round-btn accent" onclick="showModal('projectModal')">＋</button>
+      <button class="round-btn accent" onclick="openNewProjectModal()">＋</button>
     </div>
-    <div class="project-list">
-      <div class="project-card" onclick="openProject()">
-        <div class="project-thumb">🎸</div>
-        <div class="project-info">
-          <div class="project-name">五月天 諾亞方舟</div>
-          <div class="project-meta-row">
-            <span class="project-date">2025.08.15 · 台北小巨蛋</span>
-            <span class="project-songs-badge">12 首</span>
-          </div>
-        </div>
-        <div class="project-card-actions">
-          <button class="round-btn" onclick="event.stopPropagation()">⎘</button>
-          <button class="round-btn danger" onclick="event.stopPropagation()">✕</button>
-        </div>
-      </div>
-      <div class="project-card" onclick="openProject()">
-        <div class="project-thumb" style="background:linear-gradient(135deg,#7c3aed,#3b0764)">🎤</div>
-        <div class="project-info">
-          <div class="project-name">周杰倫 嘉年華</div>
-          <div class="project-meta-row">
-            <span class="project-date">2025.09.20 · 高雄巨蛋</span>
-            <span class="project-songs-badge">18 首</span>
-          </div>
-        </div>
-        <div class="project-card-actions">
-          <button class="round-btn" onclick="event.stopPropagation()">⎘</button>
-          <button class="round-btn danger" onclick="event.stopPropagation()">✕</button>
-        </div>
-      </div>
-      <div class="project-card" onclick="openProject()">
-        <div class="project-thumb" style="background:linear-gradient(135deg,#0369a1,#0c4a6e)">🎹</div>
-        <div class="project-info">
-          <div class="project-name">陳奕迅 FEAR AND DREAMS</div>
-          <div class="project-meta-row">
-            <span class="project-date">2025.11.01 · 台北小巨蛋</span>
-            <span class="project-songs-badge">20 首</span>
-          </div>
-        </div>
-        <div class="project-card-actions">
-          <button class="round-btn" onclick="event.stopPropagation()">⎘</button>
-          <button class="round-btn danger" onclick="event.stopPropagation()">✕</button>
-        </div>
-      </div>
-    </div>
+    <div class="project-list" id="projectList"></div>
     <div class="tab-bar">
       <button class="tab-item active">
         <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
@@ -738,7 +704,7 @@ body {
   <div class="screen" id="screen-detail">
     <div class="detail-header">
       <button class="back-btn" onclick="goBack('screen-projects')">‹</button>
-      <div class="detail-title">五月天 諾亞方舟</div>
+      <div class="detail-title" id="detailTitle">—</div>
       <button class="play-circle-btn" onclick="showPlayer()">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="#000"><path d="M8 5v14l11-7z"/></svg>
       </button>
@@ -829,7 +795,7 @@ body {
   <div class="screen player-screen" id="screen-player">
     <div class="player-header">
       <button class="back-btn" onclick="goBack('screen-detail')">‹</button>
-      <div class="player-project-label">五月天 諾亞方舟</div>
+      <div class="player-project-label" id="playerProjectLabel">—</div>
       <div class="live-pill"><div class="pulse-dot"></div>LIVE</div>
     </div>
     <div class="player-song-area">
@@ -957,12 +923,25 @@ body {
   <div class="modal-overlay" id="projectModal">
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-title">新增 Project</div>
-      <input class="modal-input" placeholder="演唱會名稱（例：五月天 2025）" />
-      <input class="modal-input" placeholder="日期 / 場地" />
+      <div class="modal-title" id="projectModalTitle">新增 Project</div>
+      <input class="modal-input" id="projectNameInput" placeholder="演唱會名稱（例：五月天 2025）" />
+      <input class="modal-input" id="projectDateInput" placeholder="日期 / 場地（例：2025.08.15 · 台北小巨蛋）" />
+      <div class="modal-field-label">圖示</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="projectEmojiPicker">
+        <button class="emoji-pick" onclick="pickEmoji('🎸')">🎸</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎤')">🎤</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎹')">🎹</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎵')">🎵</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎷')">🎷</button>
+        <button class="emoji-pick" onclick="pickEmoji('🥁')">🥁</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎺')">🎺</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎻')">🎻</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎶')">🎶</button>
+        <button class="emoji-pick" onclick="pickEmoji('🎧')">🎧</button>
+      </div>
       <div class="modal-actions">
         <button class="modal-btn cancel" onclick="closeModal('projectModal')">取消</button>
-        <button class="modal-btn confirm" onclick="closeModal('projectModal')">建立</button>
+        <button class="modal-btn confirm" onclick="saveProject()">建立</button>
       </div>
     </div>
   </div>
@@ -1049,7 +1028,161 @@ body {
   let miniBuilt = false;
   // reelTime is computed: parseLTC(currentSong.ltc) + seconds
 
-  const songs = [];
+  // ── Multi-project data ──
+  const PROJECT_COLORS = [
+    'linear-gradient(135deg, var(--accent), #c43000)',
+    'linear-gradient(135deg, #7c3aed, #3b0764)',
+    'linear-gradient(135deg, #0369a1, #0c4a6e)',
+    'linear-gradient(135deg, #059669, #064e3b)',
+    'linear-gradient(135deg, #d97706, #78350f)',
+    'linear-gradient(135deg, #dc2626, #7f1d1d)',
+  ];
+
+  let projects = [];
+  let currentProjectIdx = null;
+  let songs = []; // reference to current project's songs
+
+  function currentProject() {
+    return currentProjectIdx !== null ? projects[currentProjectIdx] : null;
+  }
+
+  function saveToStorage() {
+    try { localStorage.setItem('stagecode_projects', JSON.stringify(projects)); } catch(e) {}
+  }
+
+  function loadFromStorage() {
+    try {
+      const data = localStorage.getItem('stagecode_projects');
+      if (data) {
+        projects = JSON.parse(data);
+        if (!Array.isArray(projects)) projects = [];
+      }
+    } catch(e) { projects = []; }
+  }
+
+  function renderProjectList() {
+    const list = document.getElementById('projectList');
+    if (!projects.length) {
+      list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:40px 20px;">還沒有 Project<br>點右上角 ＋ 建立一個</div>';
+      return;
+    }
+    list.innerHTML = projects.map((p, i) => {
+      const bg = p.color || PROJECT_COLORS[i % PROJECT_COLORS.length];
+      const songCount = p.songs ? p.songs.length : 0;
+      return `<div class="project-card" onclick="openProject(${i})">
+        <div class="project-thumb" style="background:${bg}">${p.emoji || '🎵'}</div>
+        <div class="project-info">
+          <div class="project-name">${p.name}</div>
+          <div class="project-meta-row">
+            <span class="project-date">${p.date || ''}</span>
+            <span class="project-songs-badge">${songCount} 首</span>
+          </div>
+        </div>
+        <div class="project-card-actions">
+          <button class="round-btn" onclick="event.stopPropagation(); duplicateProject(${i})" title="複製">⎘</button>
+          <button class="round-btn danger" onclick="event.stopPropagation(); deleteProject(${i})" title="刪除">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  let _projectEmoji = '🎵';
+  let _editingProjectIdx = null; // null = new, number = editing
+
+  function pickEmoji(em) {
+    _projectEmoji = em;
+    document.querySelectorAll('.emoji-pick').forEach(b => {
+      b.classList.toggle('selected', b.textContent.trim() === em);
+    });
+  }
+
+  function openNewProjectModal() {
+    _editingProjectIdx = null;
+    _projectEmoji = '🎵';
+    document.getElementById('projectNameInput').value = '';
+    document.getElementById('projectDateInput').value = '';
+    document.getElementById('projectModalTitle').textContent = '新增 Project';
+    document.querySelectorAll('.emoji-pick').forEach(b => b.classList.remove('selected'));
+    showModal('projectModal');
+  }
+
+  function saveProject() {
+    const name = document.getElementById('projectNameInput').value.trim();
+    if (!name) return;
+    const date = document.getElementById('projectDateInput').value.trim();
+
+    if (_editingProjectIdx !== null) {
+      // editing existing
+      projects[_editingProjectIdx].name = name;
+      projects[_editingProjectIdx].date = date;
+      projects[_editingProjectIdx].emoji = _projectEmoji;
+      // update headers if this is current project
+      if (_editingProjectIdx === currentProjectIdx) updateProjectHeaders();
+    } else {
+      // new project
+      projects.push({
+        id: Math.random().toString(36).slice(2, 9),
+        name,
+        date,
+        emoji: _projectEmoji,
+        color: PROJECT_COLORS[projects.length % PROJECT_COLORS.length],
+        fpsKey: '30',
+        songs: [],
+      });
+    }
+    saveToStorage();
+    renderProjectList();
+    closeModal('projectModal');
+  }
+
+  function deleteProject(idx) {
+    if (!confirm(`確定要刪除「${projects[idx].name}」？`)) return;
+    projects.splice(idx, 1);
+    // adjust currentProjectIdx
+    if (currentProjectIdx === idx) {
+      currentProjectIdx = null;
+      songs = [];
+      showScreen('screen-projects');
+    } else if (currentProjectIdx !== null && currentProjectIdx > idx) {
+      currentProjectIdx--;
+    }
+    saveToStorage();
+    renderProjectList();
+  }
+
+  function duplicateProject(idx) {
+    const src = projects[idx];
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.id = Math.random().toString(36).slice(2, 9);
+    copy.name = src.name + ' (副本)';
+    // give new IDs to all songs
+    copy.songs.forEach(s => { s.id = Math.random().toString(36).slice(2, 9); });
+    projects.splice(idx + 1, 0, copy);
+    saveToStorage();
+    renderProjectList();
+  }
+
+  function openProject(idx) {
+    currentProjectIdx = idx;
+    const p = projects[idx];
+    songs = p.songs;
+    // restore project fps
+    setProjectFps(p.fpsKey || '30');
+    updateProjectHeaders();
+    stopAudio();
+    stopTC();
+    currentSongIdx = null;
+    miniBuilt = false;
+    renderSetlist();
+    showScreen('screen-detail');
+  }
+
+  function updateProjectHeaders() {
+    const p = currentProject();
+    if (!p) return;
+    document.getElementById('detailTitle').textContent = p.name;
+    document.getElementById('playerProjectLabel').textContent = p.name;
+  }
 
   // ── FPS configuration ──
   const FPS_PRESETS = {
@@ -1073,6 +1206,9 @@ body {
     if (labelEl) labelEl.textContent = `LTC · ${FPS_PRESETS[key].label} · Decoding`;
     const sel = document.getElementById('fpsSelect');
     if (sel) sel.value = key;
+    // save to current project
+    const p = currentProject();
+    if (p) { p.fpsKey = key; saveToStorage(); }
     if (currentSongIdx !== null) updateDisplay();
   }
 
@@ -1476,8 +1612,12 @@ body {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
   }
-  function openProject() { showScreen('screen-detail'); }
-  function goBack(id) { showScreen(id); if (id !== 'screen-player') stopTC(); }
+  // openProject(idx) is defined above in multi-project section
+  function goBack(id) {
+    showScreen(id);
+    if (id !== 'screen-player') stopTC();
+    if (id === 'screen-projects') renderProjectList();
+  }
   function toggleSeg(btn) {
     document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
@@ -1771,6 +1911,7 @@ body {
     }
     renderSetlist();
     miniBuilt = false;
+    saveToStorage();
     closeModal('editModal');
   }
 
@@ -1831,6 +1972,7 @@ body {
       }
       dragIdx = null;
       renderSetlist();
+      saveToStorage();
     }
 
     function startDrag(row, clientY) {
@@ -2057,6 +2199,7 @@ body {
     closeModal('xlsxBatchModal');
     renderSetlist();
     miniBuilt = false;
+    saveToStorage();
     alert(`匯入完成\nAdd: ${added}  Replace: ${replaced}  Skip: ${skipped}`);
   }
 
@@ -2240,6 +2383,7 @@ body {
     });
     closeModal('driveMatchModal');
     renderSetlist();
+    saveToStorage();
     alert('配對已儲存！');
   }
 
@@ -2326,6 +2470,7 @@ body {
     if (btn) { btn.style.background = ''; btn.style.color = ''; btn.style.border = ''; }
     document.getElementById('setlistArea').classList.remove('color-mode-active');
     renderSetlist();
+    saveToStorage();
   }
 
   // ── Delete mode ──
@@ -2389,12 +2534,15 @@ body {
     document.getElementById('setlistArea').classList.remove('delete-mode-active');
     miniBuilt = false;
     renderSetlist();
+    saveToStorage();
   }
 
   // ensure every song has a unique id
   function ensureIds() { songs.forEach((s, i) => { if (!s.id) s.id = 's' + i + Math.random().toString(36).slice(2,6); }); }
-  ensureIds();
-  renderSetlist();
+
+  // ── Init: load projects from localStorage ──
+  loadFromStorage();
+  renderProjectList();
   initScrub();
 
   function showModal(id) { document.getElementById(id).classList.add('visible'); }
