@@ -1083,6 +1083,42 @@ body {
       `Track ${String((pos >= 0 ? pos : 0) + 1).padStart(2, '0')} of ${showList.length}`;
   }
 
+  // ── Audio player ──
+  let _audio = null;
+
+  function stopAudio() {
+    if (_audio) { _audio.pause(); _audio.src = ''; _audio = null; }
+  }
+
+  function playDriveAudio(fileId) {
+    stopAudio();
+    if (!fileId || !_driveToken) return;
+    fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { Authorization: 'Bearer ' + _driveToken }
+    })
+    .then(r => {
+      if (!r.ok) throw new Error('無法存取音檔（錯誤 ' + r.status + '）');
+      return r.blob();
+    })
+    .then(blob => {
+      _audio = new Audio(URL.createObjectURL(blob));
+      _audio.play().catch(e => console.warn('播放失敗:', e));
+      _audio.ontimeupdate = () => {
+        if (!_audio || !_audio.duration) return;
+        seconds = Math.floor(_audio.currentTime);
+        progress = (_audio.currentTime / _audio.duration) * 100;
+        updateDisplay();
+        updateMiniBar();
+      };
+      _audio.onended = () => { stopTC(); nextSong(); };
+    })
+    .catch(e => {
+      console.warn('Drive 音檔錯誤:', e.message);
+      // fallback to timer-based playback
+      startTC();
+    });
+  }
+
   function playSongIdx(globalIdx) {
     currentSongIdx = globalIdx;
     seconds = 0; progress = 0; frameCount = 0;
@@ -1093,11 +1129,16 @@ body {
     updatePlayerHeader();
     updateMiniHighlight();
     renderSetlist();
-    // fully restart both timers so re-clicking current song also restarts
     stopTC();
     stopFrameLoop();
+    stopAudio();
     startFrameLoop();
-    startTC();
+    const song = songs[globalIdx];
+    if (song && song.driveFileId && _driveToken) {
+      playDriveAudio(song.driveFileId);
+    } else {
+      startTC();
+    }
     updateDisplay();
     updateMiniBar();
   }
@@ -1192,12 +1233,17 @@ body {
     if (isPlaying) {
       tc.classList.remove('tc-paused');
       tc.classList.add('tc-running');
-      startTC();
+      if (_audio) _audio.play();
+      else startTC();
+      startFrameLoop();
     } else {
       tc.classList.remove('tc-running');
       tc.classList.add('tc-paused');
-      stopTC();
+      if (_audio) _audio.pause();
+      else stopTC();
+      stopFrameLoop();
     }
+    updateMiniBar();
   }
   function getReelTime() {
     // true LTC = this song's start point + how many seconds in we are
@@ -1610,15 +1656,7 @@ body {
   }
 
   function miniBarTogglePlay() {
-    isPlaying = !isPlaying;
-    document.getElementById('playIcon').innerHTML = isPlaying ? pauseSVG : playSVG;
-    const tcEl = document.getElementById('tcDisplay');
-    if (tcEl) {
-      tcEl.classList.toggle('tc-paused', !isPlaying);
-      tcEl.classList.toggle('tc-running', isPlaying);
-    }
-    isPlaying ? (stopTC(), stopFrameLoop(), startFrameLoop(), startTC()) : (stopTC(), stopFrameLoop());
-    updateMiniBar();
+    togglePlay();
   }
 
   // ── Excel Import / Export ──
