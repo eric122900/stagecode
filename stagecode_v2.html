@@ -2828,14 +2828,31 @@ body {
       if (!scrubbing) return;
       scrubbing = false;
       track.classList.remove('dragging');
-      fill.classList.remove('no-transition');
       if (_audio && _pendingMiniSeek !== null) {
+        _seekLock = true;
+        const gen = _audioGeneration;
         _audio.currentTime = _pendingMiniSeek;
         _pendingMiniSeek = null;
-        _isScrubbing = false;
-        if (isPlaying) _audio.play().catch(() => {});
+        _audio.addEventListener('seeked', () => {
+          setTimeout(() => {
+            if (_audioGeneration !== gen) return;
+            _seekLock = false;
+            _isScrubbing = false;
+            fill.classList.remove('no-transition');
+            if (isPlaying && _audio) _audio.play().catch(() => {});
+          }, 50);
+        }, { once: true });
+        setTimeout(() => {
+          if (_seekLock && _audioGeneration === gen) {
+            _seekLock = false;
+            _isScrubbing = false;
+            fill.classList.remove('no-transition');
+            if (isPlaying && _audio) _audio.play().catch(() => {});
+          }
+        }, 1000);
       } else {
         _isScrubbing = false;
+        fill.classList.remove('no-transition');
       }
     }
 
