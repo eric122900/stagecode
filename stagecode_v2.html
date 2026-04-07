@@ -1313,10 +1313,9 @@ body {
   const _blobCache = new Map(); // fileId → blobUrl cache
 
   // ── LTC Pre-Decoder (offline decode entire file at load time) ──
-  let _ltcTimeline = null;  // sorted array of { time, hh, mm, ss, ff, dropFrame }
+  let _ltcTimeline = null;  // validated array of { time, hh, mm, ss, ff, dropFrame }
   let _ltcDecoded = null;   // current TC at playback position
 
-  // Pre-decode LTC from a blob: extract LTC channel, decode all frames
   async function preDecodeLTC(blob) {
     try {
       const ctx = _getAudioCtx();
@@ -1328,12 +1327,78 @@ body {
 
       const samples = audioBuf.getChannelData(ltcChIdx);
       const sr = audioBuf.sampleRate;
-      _ltcTimeline = decodeLTCFromSamples(samples, sr);
-      console.log(`LTC pre-decode: ${_ltcTimeline.length} frames found`);
+      const rawFrames = decodeLTCFromSamples(samples, sr);
+
+      // ── Strict validation: require consecutive frames with incrementing TC ──
+      _ltcTimeline = validateLTCFrames(rawFrames);
+      console.log(`LTC pre-decode: ${rawFrames.length} raw → ${_ltcTimeline.length} validated frames`);
     } catch (e) {
       console.warn('LTC pre-decode failed:', e);
       _ltcTimeline = [];
     }
+  }
+
+  function tcToAbsFrame(f) {
+    return f.hh * 108000 + f.mm * 1800 + f.ss * 30 + f.ff;
+  }
+
+  function validateLTCFrames(rawFrames) {
+    if (rawFrames.length < 5) return []; // too few to be real LTC
+
+    // Find longest run of consecutive frames where TC increments by 1 frame each time
+    // and timestamps are roughly evenly spaced (within 2x expected frame duration)
+    const fps = getFpsNominal();
+    const expectedFrameDur = 1 / fps; // seconds between frames
+
+    let bestRunStart = 0, bestRunLen = 0;
+    let runStart = 0, runLen = 1;
+
+    for (let i = 1; i < rawFrames.length; i++) {
+      const prev = rawFrames[i - 1];
+      const curr = rawFrames[i];
+      const frameDiff = tcToAbsFrame(curr) - tcToAbsFrame(prev);
+      const timeDiff = curr.time - prev.time;
+
+      // Valid: frame increments by 1-2, time spacing roughly matches
+      const validIncrement = frameDiff >= 1 && frameDiff <= 2;
+      const validTiming = timeDiff > 0 && timeDiff < expectedFrameDur * 4;
+
+      if (validIncrement && validTiming) {
+        runLen++;
+      } else {
+        if (runLen > bestRunLen) { bestRunStart = runStart; bestRunLen = runLen; }
+        runStart = i;
+        runLen = 1;
+      }
+    }
+    if (runLen > bestRunLen) { bestRunStart = runStart; bestRunLen = runLen; }
+
+    // Require at least 10 consecutive valid frames to confirm real LTC
+    if (bestRunLen < 10) return [];
+
+    // Return all frames from the file, but only those in validated runs
+    // (rebuild: find ALL runs of ≥5 consecutive valid frames)
+    const validated = [];
+    runStart = 0; runLen = 1;
+    for (let i = 1; i <= rawFrames.length; i++) {
+      let cont = false;
+      if (i < rawFrames.length) {
+        const prev = rawFrames[i - 1], curr = rawFrames[i];
+        const frameDiff = tcToAbsFrame(curr) - tcToAbsFrame(prev);
+        const timeDiff = curr.time - prev.time;
+        cont = frameDiff >= 1 && frameDiff <= 2 && timeDiff > 0 && timeDiff < expectedFrameDur * 4;
+      }
+      if (cont) {
+        runLen++;
+      } else {
+        if (runLen >= 5) {
+          for (let j = runStart; j < runStart + runLen; j++) validated.push(rawFrames[j]);
+        }
+        runStart = i;
+        runLen = 1;
+      }
+    }
+    return validated;
   }
 
   function decodeLTCFromSamples(samples, sampleRate) {
@@ -1343,23 +1408,22 @@ body {
     const expectedHalfBit = expectedBitLen / 2;
     const midpoint = expectedBitLen * 0.75;
 
-    // Find peak amplitude for threshold
+    // Scan entire channel for peak amplitude
     let peak = 0;
-    for (let i = 0; i < Math.min(samples.length, sampleRate * 2); i++) {
+    const scanStep = Math.max(1, Math.floor(samples.length / 500000)); // subsample for speed on long files
+    for (let i = 0; i < samples.length; i += scanStep) {
       const a = Math.abs(samples[i]);
       if (a > peak) peak = a;
     }
-    if (peak < 0.001) return []; // no signal
-    const thresh = peak * 0.2;
+    if (peak < 0.01) return []; // no meaningful signal
+    const thresh = peak * 0.25;
 
-    // State
     let prevSign = 0;
     let sampCount = 0;
     let lastHalf = false;
     let bitBuf = [];
     const frames = [];
 
-    // SMPTE sync word: bits 64-79 = 0011 1111 1111 1101
     const SYNC = [0,0,1,1, 1,1,1,1, 1,1,1,1, 1,1,0,1];
 
     for (let i = 0; i < samples.length; i++) {
@@ -1377,8 +1441,9 @@ body {
       sampCount = 0;
       prevSign = sign;
 
-      if (interval < expectedHalfBit * 0.3 || interval > expectedBitLen * 3) {
-        lastHalf = false; continue;
+      // Strict range: reject if outside 0.5x - 2x expected
+      if (interval < expectedHalfBit * 0.5 || interval > expectedBitLen * 2) {
+        lastHalf = false; bitBuf = []; continue;
       }
 
       const isShort = interval < midpoint;
@@ -1390,49 +1455,42 @@ body {
         bitBuf.push(0);
       }
 
-      if (bitBuf.length > 200) bitBuf = bitBuf.slice(-100);
+      if (bitBuf.length > 160) bitBuf = bitBuf.slice(-80);
 
       if (bitBuf.length >= 80) {
-        // Scan for sync word
-        for (let start = bitBuf.length - 80; start >= 0; start--) {
-          let match = true;
-          for (let j = 0; j < 16; j++) {
-            if (bitBuf[start + 64 + j] !== SYNC[j]) { match = false; break; }
-          }
-          if (!match) continue;
-
-          const b = bitBuf.slice(start, start + 80);
-          const frameUnits = b[0]+b[1]*2+b[2]*4+b[3]*8;
-          const frameTens  = b[8]+b[9]*2;
-          const secUnits   = b[16]+b[17]*2+b[18]*4+b[19]*8;
-          const secTens    = b[24]+b[25]*2+b[26]*4;
-          const minUnits   = b[32]+b[33]*2+b[34]*4+b[35]*8;
-          const minTens    = b[40]+b[41]*2+b[42]*4;
-          const hrUnits    = b[48]+b[49]*2+b[50]*4+b[51]*8;
-          const hrTens     = b[56]+b[57]*2;
-          const dropFlag   = b[10];
-
-          const ff = frameTens*10 + frameUnits;
-          const ss = secTens*10 + secUnits;
-          const mm = minTens*10 + minUnits;
-          const hh = hrTens*10 + hrUnits;
-
-          if (hh <= 23 && mm <= 59 && ss <= 59 && ff <= 39) {
-            frames.push({
-              time: i / sampleRate, // timestamp in seconds
-              hh, mm, ss, ff,
-              dropFrame: dropFlag === 1
-            });
-          }
-          bitBuf.splice(0, start + 80);
-          break;
+        const last80 = bitBuf.slice(bitBuf.length - 80);
+        // Check sync word at bits 64-79
+        let match = true;
+        for (let j = 0; j < 16; j++) {
+          if (last80[64 + j] !== SYNC[j]) { match = false; break; }
         }
+        if (!match) continue;
+
+        const b = last80;
+        const frameUnits = b[0]+b[1]*2+b[2]*4+b[3]*8;
+        const frameTens  = b[8]+b[9]*2;
+        const secUnits   = b[16]+b[17]*2+b[18]*4+b[19]*8;
+        const secTens    = b[24]+b[25]*2+b[26]*4;
+        const minUnits   = b[32]+b[33]*2+b[34]*4+b[35]*8;
+        const minTens    = b[40]+b[41]*2+b[42]*4;
+        const hrUnits    = b[48]+b[49]*2+b[50]*4+b[51]*8;
+        const hrTens     = b[56]+b[57]*2;
+        const dropFlag   = b[10];
+
+        const ff = frameTens*10 + frameUnits;
+        const ss = secTens*10 + secUnits;
+        const mm = minTens*10 + minUnits;
+        const hh = hrTens*10 + hrUnits;
+
+        if (hh <= 23 && mm <= 59 && ss <= 59 && ff < fps) {
+          frames.push({ time: i / sampleRate, hh, mm, ss, ff, dropFrame: dropFlag === 1 });
+        }
+        bitBuf = []; // clear after match (real or false)
       }
     }
     return frames;
   }
 
-  // Look up decoded TC for a given playback time (binary search)
   function lookupTC(time) {
     if (!_ltcTimeline || _ltcTimeline.length === 0) return null;
     let lo = 0, hi = _ltcTimeline.length - 1;
