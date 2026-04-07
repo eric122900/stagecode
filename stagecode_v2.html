@@ -238,6 +238,8 @@ body {
 }
 @media (hover: hover) { .song-row:hover { background: var(--surface2); } }
 .song-row.playing { background: var(--accent-dim); }
+.song-row.no-audio { opacity: 0.35; }
+.song-row.no-audio.playing { opacity: 1; }
 
 .song-num { font-size: 13px; font-weight: 700; color: var(--muted); min-width: 22px; text-align: center; }
 .song-row.playing .song-num { color: var(--accent); }
@@ -913,6 +915,14 @@ body {
           <input class="tc-input" id="tcFF" type="number" min="0" max="29" placeholder="00" />
           <span class="tc-input-lbl">FF</span>
         </div>
+      </div>
+      <!-- Audio file assignment -->
+      <div id="editAudioBlock" style="display:none;margin-top:8px;">
+        <div class="modal-field-label">音檔配對</div>
+        <div id="editAudioInfo" style="font-size:12px;color:var(--text2);margin-bottom:6px;">未配對</div>
+        <select class="modal-input" id="editAudioSelect" style="padding:10px 12px;" onchange="editAudioChanged()">
+          <option value="">— 無 —</option>
+        </select>
       </div>
       <!-- 新增模式：插入位置 & 區段 -->
       <div id="addPositionBlock" style="display:none;">
@@ -2315,8 +2325,9 @@ body {
   function renderSongRow(s, globalIdx, sectionIdx) {
     const isShow = s.section === 'show';
     const isCurrent = globalIdx === currentSongIdx;
+    const hasAudio = !!s.driveFileId;
     return `
-      <div class="song-row${isCurrent ? ' playing' : ''}${_colorMode && _colorSelectedIds.has(s.id) ? ' color-selected' : ''}" data-id="${s.id || globalIdx}" data-section="${s.section}" onclick="_colorMode ? toggleColorSelect(event, '${s.id || globalIdx}') : null">
+      <div class="song-row${isCurrent ? ' playing' : ''}${!hasAudio ? ' no-audio' : ''}${_colorMode && _colorSelectedIds.has(s.id) ? ' color-selected' : ''}" data-id="${s.id || globalIdx}" data-section="${s.section}" onclick="_colorMode ? toggleColorSelect(event, '${s.id || globalIdx}') : null">
         <div class="song-checkbox" onclick="toggleSongSelect(event, '${s.id || globalIdx}')">✓</div>
         <div class="drag-handle" data-handle="true">${DRAG_SVG}</div>
         <div class="song-num" style="${s.color ? 'color:' + s.color + '; font-weight:900;' : ''}">${isShow ? String(sectionIdx + 1).padStart(2, '0') : '—'}</div>
@@ -2413,6 +2424,7 @@ body {
     sel.value = String(songs.length - 1); // default: after last
     // show position block & section selector
     document.getElementById('addPositionBlock').style.display = 'block';
+    document.getElementById('editAudioBlock').style.display = 'none';
     editSetSection(section);
     updateFFMax();
     showModal('editModal');
@@ -2436,8 +2448,37 @@ body {
     document.getElementById('editModalTitle').textContent = '編輯歌曲';
     document.getElementById('editModalSaveBtn').textContent = '儲存';
     document.getElementById('addPositionBlock').style.display = 'none';
+
+    // Show audio file assignment
+    const audioBlock = document.getElementById('editAudioBlock');
+    const audioInfo = document.getElementById('editAudioInfo');
+    const audioSel = document.getElementById('editAudioSelect');
+    audioBlock.style.display = 'block';
+
+    // Current assignment
+    if (s.driveFileName) {
+      audioInfo.innerHTML = `<span style="color:var(--accent);">✓</span> ${s.driveFileName}`;
+    } else {
+      audioInfo.textContent = '未配對';
+    }
+
+    // Build dropdown from loaded Drive files
+    audioSel.innerHTML = '<option value="">— 無（移除配對）—</option>';
+    _driveFiles.forEach(f => {
+      const selected = (s.driveFileId === f.id) ? ' selected' : '';
+      audioSel.innerHTML += `<option value="${f.id}"${selected}>${f.name}</option>`;
+    });
+    // If the song has a file but it's not in _driveFiles (loaded from different folder), add it
+    if (s.driveFileId && !_driveFiles.find(f => f.id === s.driveFileId)) {
+      audioSel.innerHTML += `<option value="${s.driveFileId}" selected>${s.driveFileName || s.driveFileId}</option>`;
+    }
+
     updateFFMax();
     showModal('editModal');
+  }
+
+  function editAudioChanged() {
+    // Will be applied on save
   }
 
   function saveEdit() {
@@ -2461,6 +2502,21 @@ body {
       if (idx !== '' && songs[idx]) {
         songs[idx].title = name;
         songs[idx].ltc = ltc;
+
+        // Update audio file assignment
+        const audioSel = document.getElementById('editAudioSelect');
+        if (audioSel) {
+          const newFileId = audioSel.value;
+          if (newFileId) {
+            const file = _driveFiles.find(f => f.id === newFileId);
+            songs[idx].driveFileId = newFileId;
+            songs[idx].driveFileName = file ? file.name : (songs[idx].driveFileName || newFileId);
+          } else {
+            // Remove assignment
+            delete songs[idx].driveFileId;
+            delete songs[idx].driveFileName;
+          }
+        }
       }
     }
     renderSetlist();
