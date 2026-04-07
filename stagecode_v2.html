@@ -2,7 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<!-- PWA / iOS standalone app -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="STAGECODE">
+<meta name="theme-color" content="#121212">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='90' fill='%23ff6a1a'/><text x='256' y='340' font-size='260' font-weight='900' font-family='sans-serif' fill='white' text-anchor='middle'>SC</text></svg>">
+<link rel="manifest" href="data:application/json,{%22name%22:%22STAGECODE%22,%22short_name%22:%22STAGECODE%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%23121212%22,%22theme_color%22:%22%23121212%22}">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://apis.google.com/js/api.js"></script>
 <script>
@@ -37,25 +45,46 @@
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 body {
-  background: #000;
+  background: var(--bg);
   color: var(--text);
   font-family: 'Nunito', sans-serif;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 24px 16px 48px;
+  padding: 0;
 }
 
-.phone {
-  width: 390px;
-  min-height: 844px;
-  background: var(--bg);
-  border-radius: 44px;
-  border: 1px solid #2a2a2a;
-  overflow: hidden;
-  position: relative;
-  box-shadow: 0 40px 100px rgba(0,0,0,0.9);
+/* On desktop: show phone frame */
+@media (min-width: 500px) {
+  body { background: #000; padding: 24px 16px 48px; }
+  .phone {
+    width: 390px;
+    min-height: 844px;
+    background: var(--bg);
+    border-radius: 44px;
+    border: 1px solid #2a2a2a;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 40px 100px rgba(0,0,0,0.9);
+  }
+}
+
+/* On mobile: full screen, no frame */
+@media (max-width: 499px) {
+  .phone {
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--bg);
+    overflow: hidden;
+    position: relative;
+  }
+  .status-bar { display: none; } /* use real status bar */
+  .screen { height: 100vh !important; height: 100dvh !important; }
+  .screen-header { padding-top: calc(env(safe-area-inset-top, 0px) + 12px) !important; }
+  .tab-bar { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px) !important; }
 }
 
 .status-bar {
