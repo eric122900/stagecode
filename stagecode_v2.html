@@ -81,18 +81,11 @@ body {
     overflow: hidden;
     position: relative;
   }
-  .status-bar { display: none; } /* use real status bar */
   .screen { height: 100vh !important; height: 100dvh !important; }
   .screen-header { padding-top: calc(env(safe-area-inset-top, 0px) + 12px) !important; }
   .tab-bar { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px) !important; }
 }
 
-.status-bar {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 28px 8px;
-  font-size: 12px; font-weight: 700; color: var(--text);
-}
-.status-right { display: flex; gap: 5px; align-items: center; font-size: 11px; }
 
 .screen { display: none; flex-direction: column; height: calc(844px - 44px); }
 .screen.active { display: flex; }
@@ -788,10 +781,6 @@ body {
 </head>
 <body>
 <div class="phone">
-  <div class="status-bar">
-    <span>9:41</span>
-    <div class="status-right"><span>●●●</span><span>WiFi</span><span>🔋</span></div>
-  </div>
 
   <!-- SCREEN 1: PROJECTS -->
   <div class="screen active" id="screen-projects">
