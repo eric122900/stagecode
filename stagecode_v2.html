@@ -1181,16 +1181,20 @@ body {
   }
 
   function openProject(idx) {
+    const wasPlaying = currentProjectIdx;
     currentProjectIdx = idx;
     const p = projects[idx];
     songs = p.songs;
-    // restore project fps
     setProjectFps(p.fpsKey || '30');
     updateProjectHeaders();
-    stopAudio();
-    stopTC();
-    currentSongIdx = null;
-    miniBuilt = false;
+
+    // Only reset playback state if switching to a DIFFERENT project
+    if (wasPlaying !== idx) {
+      currentSongIdx = null;
+      miniBuilt = false;
+    }
+    // Don't stop audio — keep playing until user picks a different song
+
     renderSetlist();
     showScreen('screen-detail');
   }
