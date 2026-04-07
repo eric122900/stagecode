@@ -2663,9 +2663,7 @@ body {
             <span class="section-count">${showSongs.length} songs</span>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
-            <button id="deleteModeToggle" class="round-btn" style="width:28px;height:28px;font-size:13px;" onclick="toggleDeleteMode()" title="選取管理">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-            </button>
+            <button id="deleteModeToggle" class="pill-btn ghost xs" onclick="toggleDeleteMode()">☑ 選取</button>
             <button class="pill-btn ghost xs" onclick="addSong('show')">＋ Add</button>
             <button id="colorModeToggle" class="round-btn" style="width:28px;height:28px;font-size:13px;" onclick="toggleColorMode()" title="設定顏色">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
@@ -3897,19 +3895,16 @@ body {
     _deleteMode = !_deleteMode;
     _selectedIds.clear();
     const bar = document.getElementById('deleteModeBar');
-    const btn = document.getElementById('deleteModeToggle');
     const area = document.getElementById('setlistArea');
     bar.classList.toggle('visible', _deleteMode);
-    btn.style.background = _deleteMode ? 'rgba(229,62,62,0.2)' : '';
-    btn.style.color = _deleteMode ? '#ff5555' : '';
-    btn.style.border = _deleteMode ? '1px solid rgba(229,62,62,0.5)' : '';
     area.classList.toggle('delete-mode-active', _deleteMode);
     updateDeleteCount();
-    // re-render to show/hide checkboxes
     renderSetlist();
     if (_deleteMode) {
-      // re-apply delete-mode-active after render
       document.getElementById('setlistArea').classList.add('delete-mode-active');
+      // Highlight the toggle button
+      const btn = document.getElementById('deleteModeToggle');
+      if (btn) { btn.style.background = 'rgba(255,106,26,0.2)'; btn.style.color = 'var(--accent)'; }
     }
   }
 
@@ -3935,43 +3930,31 @@ body {
     document.getElementById('moveOtherBtn').disabled = n === 0;
   }
 
-  function moveSelectedTo(section) {
-    if (_selectedIds.size === 0) return;
-    const n = _selectedIds.size;
-    songs.forEach(s => {
-      if (_selectedIds.has(s.id)) s.section = section;
-    });
+  function exitSelectMode() {
     _selectedIds.clear();
     _deleteMode = false;
     document.getElementById('deleteModeBar').classList.remove('visible');
-    const btn = document.getElementById('deleteModeToggle');
-    btn.style.background = '';
-    btn.style.color = '';
-    btn.style.border = '';
     document.getElementById('setlistArea').classList.remove('delete-mode-active');
     miniBuilt = false;
     renderSetlist();
     saveToStorage();
   }
 
+  function moveSelectedTo(section) {
+    if (_selectedIds.size === 0) return;
+    songs.forEach(s => {
+      if (_selectedIds.has(s.id)) s.section = section;
+    });
+    exitSelectMode();
+  }
+
   function confirmDelete() {
     if (_selectedIds.size === 0) return;
-    const n = _selectedIds.size;
+    if (!confirm(`確定要刪除 ${_selectedIds.size} 首歌？`)) return;
     for (let i = songs.length - 1; i >= 0; i--) {
       if (_selectedIds.has(songs[i].id)) songs.splice(i, 1);
     }
-    _selectedIds.clear();
-    _deleteMode = false;
-    document.getElementById('deleteModeBar').classList.remove('visible');
-    const btn = document.getElementById('deleteModeToggle');
-    btn.style.background = '';
-    btn.style.color = '';
-    btn.style.border = '';
-    // explicitly remove delete-mode-active before re-render
-    document.getElementById('setlistArea').classList.remove('delete-mode-active');
-    miniBuilt = false;
-    renderSetlist();
-    saveToStorage();
+    exitSelectMode();
   }
 
   // ensure every song has a unique id
