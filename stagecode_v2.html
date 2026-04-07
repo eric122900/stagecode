@@ -768,7 +768,10 @@ body {
   <div class="screen active" id="screen-projects">
     <div class="screen-header">
       <div class="screen-title">STAGECODE</div>
-      <button class="round-btn accent" onclick="openNewProjectModal()">＋</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="pill-btn ghost xs" onclick="importProject()">↓ Import</button>
+        <button class="round-btn accent" onclick="openNewProjectModal()">＋</button>
+      </div>
     </div>
     <div class="project-list" id="projectList"></div>
     <div class="tab-bar">
@@ -1196,6 +1199,7 @@ body {
           </div>
         </div>
         <div class="project-card-actions">
+          <button class="round-btn" onclick="event.stopPropagation(); exportProject(${i})" title="匯出">↑</button>
           <button class="round-btn" onclick="event.stopPropagation(); editProject(${i})" title="編輯">✎</button>
           <button class="round-btn" onclick="event.stopPropagation(); duplicateProject(${i})" title="複製">⎘</button>
           <button class="round-btn danger" onclick="event.stopPropagation(); deleteProject(${i})" title="刪除">✕</button>
@@ -1338,11 +1342,63 @@ body {
     const copy = JSON.parse(JSON.stringify(src));
     copy.id = Math.random().toString(36).slice(2, 9);
     copy.name = src.name + ' (副本)';
-    // give new IDs to all songs
     copy.songs.forEach(s => { s.id = Math.random().toString(36).slice(2, 9); });
     projects.splice(idx + 1, 0, copy);
     saveToStorage();
     renderProjectList();
+  }
+
+  // ── Project Import / Export ──
+  function exportProject(idx) {
+    const p = projects[idx];
+    // Deep copy to export clean data
+    const exportData = JSON.parse(JSON.stringify(p));
+    exportData._stagecodeVersion = 1;
+    exportData._exportDate = new Date().toISOString();
+
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = (p.name || 'Project').replace(/[^a-zA-Z0-9\u4e00-\u9fff _-]/g, '').trim();
+    a.href = url;
+    a.download = `${safeName}.stagecode`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importProject() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.stagecode,.json';
+    input.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (!data.name || !data.songs) {
+            alert('無效的 Project 檔案');
+            return;
+          }
+          // Clean up: new ID, mark as imported
+          data.id = Math.random().toString(36).slice(2, 9);
+          data.songs.forEach(s => { s.id = Math.random().toString(36).slice(2, 9); });
+          delete data._stagecodeVersion;
+          delete data._exportDate;
+
+          projects.push(data);
+          saveToStorage();
+          renderProjectList();
+          alert(`已匯入 Project「${data.name}」\n${data.songs.length} 首歌`);
+        } catch (err) {
+          alert('匯入失敗：' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   }
 
   function openProject(idx) {
