@@ -283,7 +283,9 @@ body {
   color: var(--muted); margin-bottom: 10px;
   display: flex; align-items: center; gap: 8px;
 }
-.tc-decoding-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 1s ease-in-out infinite; }
+.tc-decoding-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 1s ease-in-out infinite; transition: background 0.3s; }
+.tc-decoding-dot.no-signal { background: var(--muted); }
+.tc-decoding-dot.live { background: var(--green); }
 .tc-main {
   font-family: 'DM Mono', monospace; font-size: 56px; font-weight: 500;
   letter-spacing: -1px; color: var(--text); line-height: 1;
@@ -804,7 +806,7 @@ body {
     </div>
     <div class="tc-area">
       <div class="tc-label-row">
-        <div class="tc-decoding-dot"></div>
+        <div class="tc-decoding-dot" id="tcDecodingDot"></div>
         <span id="tcFpsLabel">LTC · 30 fps · Decoding</span>
       </div>
       <div class="tc-main tc-running" id="tcDisplay">
@@ -1310,7 +1312,159 @@ body {
   let _blobUrl = null;
   const _blobCache = new Map(); // fileId → blobUrl cache
 
-  // ── Channel routing (mute LTC channel) ──
+  // ── LTC Decoder (SMPTE Biphase Mark Code) ──
+  let _ltcDecoded = null; // { hh, mm, ss, ff } or null if no valid decode
+  let _ltcDecodedAt = 0;  // performance.now() of last valid decode
+  let _ltcProcessor = null;
+
+  function createLTCDecoder(ctx) {
+    // ScriptProcessor to analyze raw LTC samples
+    const bufSize = 1024;
+    const processor = ctx.createScriptProcessor(bufSize, 1, 1);
+    const sampleRate = ctx.sampleRate;
+
+    // Decoder state
+    let prevSample = 0;
+    let samplesSinceTransition = 0;
+    let bitBuffer = [];
+    let halfBitLen = 0; // estimated samples per half-bit
+    let lastTransitionWasHalf = false;
+    let syncLocked = false;
+    // Adaptive threshold
+    let shortAvg = 0;
+    let longAvg = 0;
+    let transitionCount = 0;
+
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      const output = e.outputBuffer.getChannelData(0);
+      // silence output (LTC channel should not be heard)
+      for (let i = 0; i < output.length; i++) output[i] = 0;
+
+      for (let i = 0; i < input.length; i++) {
+        const sample = input[i];
+        samplesSinceTransition++;
+
+        // Detect zero crossing
+        if ((prevSample >= 0 && sample < 0) || (prevSample < 0 && sample >= 0)) {
+          const interval = samplesSinceTransition;
+          samplesSinceTransition = 0;
+
+          // Skip very short intervals (noise)
+          if (interval < 4) { prevSample = sample; continue; }
+
+          // Bootstrap: collect first transitions to establish timing
+          if (transitionCount < 20) {
+            transitionCount++;
+            if (transitionCount === 1) { shortAvg = interval; longAvg = interval * 2; }
+            else {
+              const threshold = (shortAvg + longAvg) / 2;
+              if (interval < threshold) shortAvg = shortAvg * 0.8 + interval * 0.2;
+              else longAvg = longAvg * 0.8 + interval * 0.2;
+            }
+            prevSample = sample;
+            continue;
+          }
+
+          const threshold = (shortAvg + longAvg) / 2;
+          const isShort = interval < threshold;
+
+          // Update running averages
+          if (isShort) shortAvg = shortAvg * 0.9 + interval * 0.1;
+          else longAvg = longAvg * 0.9 + interval * 0.1;
+
+          if (isShort) {
+            if (lastTransitionWasHalf) {
+              // Two short intervals = one '1' bit
+              bitBuffer.push(1);
+              lastTransitionWasHalf = false;
+            } else {
+              lastTransitionWasHalf = true;
+            }
+          } else {
+            // One long interval = one '0' bit
+            if (lastTransitionWasHalf) {
+              // Framing error — reset
+              lastTransitionWasHalf = false;
+              bitBuffer = [];
+            }
+            bitBuffer.push(0);
+            lastTransitionWasHalf = false;
+          }
+
+          // Keep buffer to max 160 bits (2 frames worth)
+          if (bitBuffer.length > 160) bitBuffer = bitBuffer.slice(-80);
+
+          // Look for sync word at end of buffer (need at least 80 bits)
+          if (bitBuffer.length >= 80) {
+            const frame = tryDecodeLTCFrame(bitBuffer);
+            if (frame) {
+              _ltcDecoded = frame;
+              _ltcDecodedAt = performance.now();
+              bitBuffer = [];
+            }
+          }
+        }
+        prevSample = sample;
+      }
+    };
+    return processor;
+  }
+
+  // SMPTE LTC sync word: 0011 1111 1111 1101 (bits 64-79)
+  const LTC_SYNC_FWD = [0,0,1,1, 1,1,1,1, 1,1,1,1, 1,1,0,1];
+  const LTC_SYNC_REV = [1,0,1,1, 1,1,1,1, 1,1,1,1, 1,1,0,0];
+
+  function tryDecodeLTCFrame(bits) {
+    const len = bits.length;
+    // Check for forward sync at end of buffer
+    const last80 = bits.slice(len - 80);
+    const syncBits = last80.slice(64, 80);
+    let forward = true;
+    for (let i = 0; i < 16; i++) {
+      if (syncBits[i] !== LTC_SYNC_FWD[i]) { forward = false; break; }
+    }
+    if (!forward) {
+      // Try reverse
+      let reverse = true;
+      const first16 = last80.slice(0, 16);
+      for (let i = 0; i < 16; i++) {
+        if (first16[i] !== LTC_SYNC_REV[i]) { reverse = false; break; }
+      }
+      if (!reverse) return null;
+      // Reverse the frame
+      last80.reverse();
+    }
+
+    // Decode BCD fields from the 80-bit frame
+    const b = last80;
+    const frameUnits = b[0] + b[1]*2 + b[2]*4 + b[3]*8;
+    const frameTens  = b[8] + b[9]*2;
+    const secUnits   = b[16] + b[17]*2 + b[18]*4 + b[19]*8;
+    const secTens    = b[24] + b[25]*2 + b[26]*4;
+    const minUnits   = b[32] + b[33]*2 + b[34]*4 + b[35]*8;
+    const minTens    = b[40] + b[41]*2 + b[42]*4;
+    const hrUnits    = b[48] + b[49]*2 + b[50]*4 + b[51]*8;
+    const hrTens     = b[56] + b[57]*2;
+    const dropFlag   = b[10];
+
+    const ff = frameTens * 10 + frameUnits;
+    const ss = secTens * 10 + secUnits;
+    const mm = minTens * 10 + minUnits;
+    const hh = hrTens * 10 + hrUnits;
+
+    // Sanity check
+    if (hh > 23 || mm > 59 || ss > 59 || ff > 39) return null;
+
+    return { hh, mm, ss, ff, dropFrame: dropFlag === 1 };
+  }
+
+  // Check if we have a fresh decoded LTC value (within last 500ms)
+  function hasLiveTC() {
+    return _ltcDecoded !== null && (performance.now() - _ltcDecodedAt) < 500;
+  }
+
+  // ── Channel routing (mute LTC channel, decode LTC) ──
   let _audioCtx = null;
   let _sourceNode = null;
   let _splitter = null;
@@ -1323,6 +1477,16 @@ body {
     return _audioCtx;
   }
 
+  function _connectLTCDecoder(ctx, splitter) {
+    if (_ltcProcessor) { try { _ltcProcessor.disconnect(); } catch(e){} }
+    _ltcProcessor = createLTCDecoder(ctx);
+    const ltcCh = (_ltcChannel === 'right') ? 1 : 0;
+    splitter.connect(_ltcProcessor, ltcCh);
+    // ScriptProcessor requires a connected output (even if silent)
+    _ltcProcessor.connect(ctx.destination);
+    _ltcDecoded = null;
+  }
+
   function _routeAudio() {
     if (!_audio) return;
     const ctx = _getAudioCtx();
@@ -1331,6 +1495,7 @@ body {
     if (_sourceNode) { try { _sourceNode.disconnect(); } catch(e){} }
     if (_splitter) { try { _splitter.disconnect(); } catch(e){} }
     if (_merger) { try { _merger.disconnect(); } catch(e){} }
+    if (_ltcProcessor) { try { _ltcProcessor.disconnect(); } catch(e){} }
 
     _sourceNode = ctx.createMediaElementSource(_audio);
     _splitter = ctx.createChannelSplitter(2);
@@ -1338,13 +1503,14 @@ body {
 
     _sourceNode.connect(_splitter);
 
-    // Music channel → both L+R output; LTC channel → nowhere (muted)
+    // Music channel → both L+R output; LTC channel → decoder only (muted)
     const musicCh = (_ltcChannel === 'right') ? 0 : 1;
-    _splitter.connect(_merger, musicCh, 0); // music → left out
-    _splitter.connect(_merger, musicCh, 1); // music → right out
-    // LTC channel not connected = silent
-
+    _splitter.connect(_merger, musicCh, 0);
+    _splitter.connect(_merger, musicCh, 1);
     _merger.connect(ctx.destination);
+
+    // Connect LTC channel to decoder
+    _connectLTCDecoder(ctx, _splitter);
   }
 
   function _rerouteAudio() {
@@ -1353,6 +1519,7 @@ body {
 
     try { _splitter.disconnect(); } catch(e){}
     try { _merger.disconnect(); } catch(e){}
+    if (_ltcProcessor) { try { _ltcProcessor.disconnect(); } catch(e){} }
 
     _splitter = ctx.createChannelSplitter(2);
     _merger = ctx.createChannelMerger(2);
@@ -1362,6 +1529,9 @@ body {
     _splitter.connect(_merger, musicCh, 0);
     _splitter.connect(_merger, musicCh, 1);
     _merger.connect(ctx.destination);
+
+    // Reconnect LTC decoder to new channel
+    _connectLTCDecoder(ctx, _splitter);
 
     // update player sub label
     const subEl = document.querySelector('.tc-sub');
@@ -1380,6 +1550,8 @@ body {
     _isScrubbing = false;
     _pendingSeekTime = null;
     _audioGeneration++;
+    _ltcDecoded = null;
+    if (_ltcProcessor) { try { _ltcProcessor.disconnect(); } catch(e){} _ltcProcessor = null; }
     if (_sourceNode) { try { _sourceNode.disconnect(); } catch(e){} _sourceNode = null; }
     if (_splitter) { try { _splitter.disconnect(); } catch(e){} _splitter = null; }
     if (_merger) { try { _merger.disconnect(); } catch(e){} _merger = null; }
@@ -1650,7 +1822,11 @@ body {
     updateMiniBar();
   }
   function getReelTime() {
-    // true LTC = this song's start point + how many seconds in we are
+    if (hasLiveTC()) {
+      const tc = _ltcDecoded;
+      return tc.hh * 3600 + tc.mm * 60 + tc.ss;
+    }
+    // fallback: song start point + elapsed seconds
     return parseLTC(songs[currentSongIdx].ltc) + seconds;
   }
 
@@ -1715,18 +1891,51 @@ body {
   }
 
   function updateFrameDisplay() {
-    // only update the FF part for performance
     const tcEl = document.getElementById('tcDisplay');
     if (!tcEl) return;
+    if (hasLiveTC()) {
+      // Full update from decoded LTC
+      const tc = _ltcDecoded;
+      const df = tc.dropFrame || isDropFrame();
+      const ffSep = df ? ';' : ':';
+      const fmt = n => String(n).padStart(2, '0');
+      tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
+      return;
+    }
+    // Fallback: only update the FF part
     const ffSpan = tcEl.querySelector('.tc-ff-part');
     const ffSep = isDropFrame() ? ';' : ':';
     if (ffSpan) ffSpan.textContent = ffSep + String(frameCount).padStart(2, '0');
   }
 
   function updateDisplay() {
+    const live = hasLiveTC();
     const rt = getReelTime();
     const fmt = n => String(n).padStart(2, '0');
-    document.getElementById('tcDisplay').innerHTML = buildTCHTML(rt, frameCount);
+    if (live) {
+      const tc = _ltcDecoded;
+      const df = tc.dropFrame || isDropFrame();
+      const ffSep = df ? ';' : ':';
+      document.getElementById('tcDisplay').innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
+    } else {
+      document.getElementById('tcDisplay').innerHTML = buildTCHTML(rt, frameCount);
+    }
+    // Update decoding status indicator
+    const dot = document.getElementById('tcDecodingDot');
+    const label = document.getElementById('tcFpsLabel');
+    if (dot && label) {
+      const fpsLabel = FPS_PRESETS[projectFpsKey].label;
+      if (live) {
+        dot.className = 'tc-decoding-dot live';
+        label.textContent = `LTC · ${fpsLabel} · Decoding`;
+      } else if (_audio) {
+        dot.className = 'tc-decoding-dot no-signal';
+        label.textContent = `LTC · ${fpsLabel} · No Signal`;
+      } else {
+        dot.className = 'tc-decoding-dot no-signal';
+        label.textContent = `LTC · ${fpsLabel} · Simulated`;
+      }
+    }
     // elapsed & remaining
     document.getElementById('currentTime').textContent = fmtTime(seconds);
     const totalDur = (_audio && _audio.duration) ? Math.floor(_audio.duration) : SONG_DURATION;
