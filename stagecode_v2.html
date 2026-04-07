@@ -3516,25 +3516,65 @@ body {
 
   function driveCleanName(str) {
     return str
-      .replace(/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i, '')
-      .replace(/\b(new|final|revised|demo|master|mix|v\d+|version\d*|\d{4}[-_]?\d{2}[-_]?\d{2}|\d{8})\b/gi, '')
-      .replace(/^[\d]+[._\s-]+/, '') // remove leading track numbers
-      .replace(/[_\-]+/g, ' ')
+      .replace(/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i, '')  // remove extension
+      .replace(/\([^)]*\)/g, '')                             // remove (LTC+Cue), (Short Ver), etc.
+      .replace(/\b(new|final|revised|demo|master|mix|ver|v\d+|version\d*)\b/gi, '') // remove common tags
+      .replace(/\b\d{6,8}\b/g, '')                           // remove date codes like 260219
+      .replace(/^[\d]+[._+\s-]+/, '')                        // remove leading track numbers (1.0+1.1, 01-, etc.)
+      .replace(/[_\-+]+/g, ' ')                              // + _ - → space
       .replace(/\s+/g, ' ')
       .trim()
       .toUpperCase();
   }
 
-  function driveSimilarity(a, b) {
-    // check if b contains a or a contains b
-    if (b.includes(a) || a.includes(b)) return 0.9;
-    // count matching words
+  // Split a name into sub-song names (for medley filenames like "Song A+Song B+Song C")
+  function driveSplitNames(str) {
+    // Split on + but keep each part as a separate name
+    const cleaned = str
+      .replace(/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i, '')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/\b(new|final|revised|demo|master|mix|ver|v\d+|version\d*)\b/gi, '')
+      .replace(/\b\d{6,8}\b/g, '')
+      .replace(/^[\d]+[._+\s-]+/, '');
+    return cleaned.split('+').map(s => s.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase()).filter(s => s.length > 0);
+  }
+
+  function driveSimilarity(songName, fileName) {
+    const a = songName; // already cleaned
+    const b = fileName; // already cleaned
+
+    // 1. Exact substring: song name appears in filename or vice versa
+    if (a.length > 2 && b.includes(a)) return 0.95;
+    if (b.length > 2 && a.includes(b)) return 0.9;
+
+    // 2. Word-level matching
     const wa = new Set(a.split(' ').filter(w => w.length > 1));
     const wb = new Set(b.split(' ').filter(w => w.length > 1));
+    if (wa.size === 0) return 0;
     let match = 0;
     wa.forEach(w => { if (wb.has(w)) match++; });
-    const score = match / Math.max(wa.size, wb.size, 1);
+    // Score based on how many song words found in filename
+    // Use song word count as denominator (not max) — song is shorter, so this is fairer
+    const score = match / wa.size;
     return score;
+  }
+
+  // Enhanced matching: also try matching against sub-names split from filename
+  function driveMatchScore(songTitle, file) {
+    const cleanSong = driveCleanName(songTitle);
+    const cleanFile = driveCleanName(file.name);
+
+    // Standard similarity
+    let best = driveSimilarity(cleanSong, cleanFile);
+
+    // Also check against each sub-name in the filename (medley support)
+    const subNames = driveSplitNames(file.name);
+    subNames.forEach(sub => {
+      const score = driveSimilarity(cleanSong, sub);
+      if (score > best) best = score;
+    });
+
+    return best;
   }
 
   function driveMatchFiles() {
@@ -3542,17 +3582,15 @@ body {
     closeModal('driveModal');
 
     _driveMatches = songs.map(song => {
-      const cleanSong = driveCleanName(song.title);
       let bestFile = null, bestScore = 0;
       _driveFiles.forEach(f => {
-        const cleanFile = driveCleanName(f.name);
-        const score = driveSimilarity(cleanSong, cleanFile);
+        const score = driveMatchScore(song.title, f);
         if (score > bestScore) { bestScore = score; bestFile = f; }
       });
       let type = 'none';
       if (bestScore >= 0.9) type = 'exact';
-      else if (bestScore >= 0.4) type = 'fuzzy';
-      return { song, file: bestScore >= 0.4 ? bestFile : null, score: bestScore, type };
+      else if (bestScore >= 0.5) type = 'fuzzy';
+      return { song, file: bestScore >= 0.5 ? bestFile : null, score: bestScore, type };
     });
 
     // ── LTC-based matching for fuzzy/none results ──
