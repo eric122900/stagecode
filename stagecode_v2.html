@@ -1729,19 +1729,30 @@ body {
     });
   }
 
-  // ── Auto-match medley: assign same audio to songs whose LTC falls within range ──
+  // ── Auto-match medley: assign same audio to nearby songs whose LTC falls within range ──
   function autoMatchMedleySongs(fileId) {
     const timeline = _ltcCache.get(fileId);
     const range = getLTCRange(timeline);
     if (!range) return;
 
-    // Find the song that owns this file
-    const ownerSong = songs.find(s => s.driveFileId === fileId);
-    if (!ownerSong) return;
-    const ownerFileName = ownerSong.driveFileName || '';
+    // Find all song indices that own this file
+    const ownerIdxList = [];
+    songs.forEach((s, i) => { if (s.driveFileId === fileId) ownerIdxList.push(i); });
+    if (ownerIdxList.length === 0) return;
+    const ownerFileName = songs[ownerIdxList[0]].driveFileName || '';
+
+    // Build set of candidate indices: within ±5 positions of any owner
+    const candidates = new Set();
+    ownerIdxList.forEach(oi => {
+      for (let d = -5; d <= 5; d++) {
+        const ci = oi + d;
+        if (ci >= 0 && ci < songs.length) candidates.add(ci);
+      }
+    });
 
     let matched = 0;
-    songs.forEach(s => {
+    candidates.forEach(ci => {
+      const s = songs[ci];
       if (s.driveFileId) return; // already has a file assigned
       const songLtcSec = parseLTC(s.ltc);
       // Check if this song's LTC start falls within the audio's LTC range
@@ -1751,10 +1762,14 @@ body {
         matched++;
       }
     });
+
+    // If we matched new songs, re-run to expand the neighbor window
     if (matched > 0) {
       console.log(`Medley auto-match: ${matched} songs linked to ${ownerFileName}`);
       saveToStorage();
       renderSetlist();
+      // Recursively expand — newly matched songs open up new neighbor windows
+      autoMatchMedleySongs(fileId);
     }
   }
 
@@ -1779,6 +1794,31 @@ body {
     }
   }
 
+  // Find a shared audio file from nearby songs (±5 positions) whose LTC range covers this song
+  function findNearbySharedFile(globalIdx) {
+    const song = songs[globalIdx];
+    if (!song) return null;
+    const songLtcSec = parseLTC(song.ltc);
+
+    for (let d = -5; d <= 5; d++) {
+      const ni = globalIdx + d;
+      if (ni < 0 || ni >= songs.length || ni === globalIdx) continue;
+      const neighbor = songs[ni];
+      if (!neighbor.driveFileId) continue;
+      const timeline = _ltcCache.get(neighbor.driveFileId);
+      if (!timeline) continue;
+      const range = getLTCRange(timeline);
+      if (range && songLtcSec >= range.startSec && songLtcSec <= range.endSec) {
+        // This neighbor's audio covers our LTC — borrow it
+        song.driveFileId = neighbor.driveFileId;
+        song.driveFileName = neighbor.driveFileName;
+        saveToStorage();
+        return neighbor.driveFileId;
+      }
+    }
+    return null;
+  }
+
   function playSongIdx(globalIdx) {
     currentSongIdx = globalIdx;
     seconds = 0; progress = 0; frameCount = 0;
@@ -1793,8 +1833,13 @@ body {
     stopFrameLoop();
     stopAudio();
     const song = songs[globalIdx];
+
+    // If no file assigned, try to borrow from nearby songs (medley)
+    if (song && !song.driveFileId && _driveToken) {
+      findNearbySharedFile(globalIdx);
+    }
+
     if (song && song.driveFileId && _driveToken) {
-      // Check if we need to seek to a specific LTC position (medley)
       const songLtcSec = parseLTC(song.ltc);
       const timeline = _ltcCache.get(song.driveFileId);
       const seekTime = timeline ? ltcToAudioTime(timeline, songLtcSec) : null;
