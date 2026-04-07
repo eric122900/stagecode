@@ -1092,31 +1092,33 @@ body {
 
   function playDriveAudio(fileId) {
     stopAudio();
-    if (!fileId || !_driveToken) return;
-    fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: { Authorization: 'Bearer ' + _driveToken }
-    })
-    .then(r => {
-      if (!r.ok) throw new Error('無法存取音檔（錯誤 ' + r.status + '）');
-      return r.blob();
-    })
-    .then(blob => {
-      _audio = new Audio(URL.createObjectURL(blob));
-      _audio.play().catch(e => console.warn('播放失敗:', e));
-      _audio.ontimeupdate = () => {
-        if (!_audio || !_audio.duration) return;
-        seconds = Math.floor(_audio.currentTime);
-        progress = (_audio.currentTime / _audio.duration) * 100;
-        updateDisplay();
-        updateMiniBar();
-      };
-      _audio.onended = () => { stopTC(); nextSong(); };
-    })
-    .catch(e => {
-      console.warn('Drive 音檔錯誤:', e.message);
-      // fallback to timer-based playback
-      startTC();
+    if (!fileId) return;
+    // use authenticated streaming via API with range support
+    const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${_driveToken}`;
+    _audio = new Audio(streamUrl);
+    _audio.preload = 'none';
+    _audio.play().catch(e => {
+      console.warn('串流失敗，嘗試備用方式:', e);
+      // fallback: public download URL
+      const fallbackUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+      _audio = new Audio(fallbackUrl);
+      _audio.play().catch(e2 => {
+        console.warn('備用方式也失敗:', e2);
+        startTC(); // 回到模擬模式
+      });
     });
+    _audio.ontimeupdate = () => {
+      if (!_audio || !_audio.duration) return;
+      seconds = Math.floor(_audio.currentTime);
+      progress = (_audio.currentTime / _audio.duration) * 100;
+      updateDisplay();
+      updateMiniBar();
+    };
+    _audio.onended = () => { stopTC(); nextSong(); };
+    _audio.onerror = (e) => {
+      console.warn('音檔錯誤:', e);
+      startTC();
+    };
   }
 
   function playSongIdx(globalIdx) {
