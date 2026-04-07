@@ -1493,7 +1493,7 @@ body {
 
   function lookupTC(time) {
     if (!_ltcTimeline || _ltcTimeline.length === 0) return null;
-    // Binary search for nearest decoded frame at or before 'time'
+    // Binary search by audio time (timeline is sorted by time)
     let lo = 0, hi = _ltcTimeline.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
@@ -1509,9 +1509,7 @@ body {
     if (elapsed < 0) return base;
     const extraFrames = Math.round(elapsed * fps);
 
-    // Convert base TC to absolute frame count, add extra, convert back
     let absFrame = base.hh * 108000 + base.mm * 1800 + base.ss * fps + base.ff + extraFrames;
-    // Handle overflow
     const maxFramePerDay = 24 * 3600 * fps;
     if (absFrame >= maxFramePerDay) absFrame %= maxFramePerDay;
 
@@ -1524,31 +1522,54 @@ body {
     return { hh, mm, ss, ff, dropFrame: base.dropFrame };
   }
 
-  // Get LTC range of a timeline: { startTC, endTC } in total seconds
-  function getLTCRange(timeline) {
-    if (!timeline || timeline.length === 0) return null;
-    const first = timeline[0];
-    const last = timeline[timeline.length - 1];
-    return {
-      startSec: first.hh * 3600 + first.mm * 60 + first.ss,
-      endSec: last.hh * 3600 + last.mm * 60 + last.ss,
-      startTime: first.time,
-      endTime: last.time,
-    };
-  }
-
   // Find the audio playback time for a given LTC timecode (in seconds)
+  // Handles LTC jumps/discontinuities — scans for closest match within tolerance
   function ltcToAudioTime(timeline, ltcSec) {
     if (!timeline || timeline.length === 0) return null;
-    // Binary search for closest frame matching the LTC second
-    let lo = 0, hi = timeline.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      const frameSec = timeline[mid].hh * 3600 + timeline[mid].mm * 60 + timeline[mid].ss;
-      if (frameSec <= ltcSec) lo = mid;
-      else hi = mid - 1;
+    const fps = getFpsNominal();
+    const tolerance = 1; // 1 second tolerance (covers ±30 frames)
+
+    let bestTime = null;
+    let bestDiff = Infinity;
+
+    // Subsample for speed: check every ~fps frames (one per second of LTC)
+    const step = Math.max(1, Math.floor(fps / 2));
+    for (let i = 0; i < timeline.length; i += step) {
+      const f = timeline[i];
+      const frameSec = f.hh * 3600 + f.mm * 60 + f.ss;
+      const diff = Math.abs(frameSec - ltcSec);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestTime = f.time;
+      }
     }
-    return timeline[lo].time;
+
+    // Refine: search ±step around the best match for exact frame
+    if (bestTime !== null && bestDiff <= tolerance + 1) {
+      const bestIdx = timeline.findIndex(f => f.time === bestTime);
+      const searchStart = Math.max(0, bestIdx - step);
+      const searchEnd = Math.min(timeline.length, bestIdx + step);
+      for (let i = searchStart; i < searchEnd; i++) {
+        const f = timeline[i];
+        const frameSec = f.hh * 3600 + f.mm * 60 + f.ss;
+        const diff = Math.abs(frameSec - ltcSec);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestTime = f.time;
+        }
+      }
+    }
+
+    // Only return if within tolerance
+    if (bestDiff <= tolerance) {
+      return bestTime;
+    }
+    return null;
+  }
+
+  // Check if a song's LTC exists in a timeline (within tolerance)
+  function songLtcExistsInTimeline(timeline, songLtcSec) {
+    return ltcToAudioTime(timeline, songLtcSec) !== null;
   }
 
   function hasLiveTC() {
@@ -1729,19 +1750,17 @@ body {
     });
   }
 
-  // ── Auto-match medley: assign same audio to nearby songs whose LTC falls within range ──
+  // ── Auto-match medley: assign same audio to nearby songs whose LTC exists in timeline ──
   function autoMatchMedleySongs(fileId) {
     const timeline = _ltcCache.get(fileId);
-    const range = getLTCRange(timeline);
-    if (!range) return;
+    if (!timeline || timeline.length === 0) return;
 
-    // Find all song indices that own this file
     const ownerIdxList = [];
     songs.forEach((s, i) => { if (s.driveFileId === fileId) ownerIdxList.push(i); });
     if (ownerIdxList.length === 0) return;
     const ownerFileName = songs[ownerIdxList[0]].driveFileName || '';
 
-    // Build set of candidate indices: within ±5 positions of any owner
+    // Check ±5 neighbors of each owner
     const candidates = new Set();
     ownerIdxList.forEach(oi => {
       for (let d = -5; d <= 5; d++) {
@@ -1753,22 +1772,20 @@ body {
     let matched = 0;
     candidates.forEach(ci => {
       const s = songs[ci];
-      if (s.driveFileId) return; // already has a file assigned
+      if (s.driveFileId) return;
       const songLtcSec = parseLTC(s.ltc);
-      // Check if this song's LTC start falls within the audio's LTC range
-      if (songLtcSec >= range.startSec && songLtcSec <= range.endSec) {
+      // Use tolerance-based search — handles LTC jumps/discontinuities
+      if (songLtcExistsInTimeline(timeline, songLtcSec)) {
         s.driveFileId = fileId;
         s.driveFileName = ownerFileName;
         matched++;
       }
     });
 
-    // If we matched new songs, re-run to expand the neighbor window
     if (matched > 0) {
       console.log(`Medley auto-match: ${matched} songs linked to ${ownerFileName}`);
       saveToStorage();
       renderSetlist();
-      // Recursively expand — newly matched songs open up new neighbor windows
       autoMatchMedleySongs(fileId);
     }
   }
@@ -1790,7 +1807,7 @@ body {
     }
   }
 
-  // Find a shared audio file from nearby songs (±5 positions) whose LTC range covers this song
+  // Find a shared audio file from nearby songs (±5 positions) whose LTC timeline contains this song's LTC
   function findNearbySharedFile(globalIdx) {
     const song = songs[globalIdx];
     if (!song) return null;
@@ -1803,9 +1820,7 @@ body {
       if (!neighbor.driveFileId) continue;
       const timeline = _ltcCache.get(neighbor.driveFileId);
       if (!timeline) continue;
-      const range = getLTCRange(timeline);
-      if (range && songLtcSec >= range.startSec && songLtcSec <= range.endSec) {
-        // This neighbor's audio covers our LTC — borrow it
+      if (songLtcExistsInTimeline(timeline, songLtcSec)) {
         song.driveFileId = neighbor.driveFileId;
         song.driveFileName = neighbor.driveFileName;
         saveToStorage();
