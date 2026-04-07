@@ -1204,10 +1204,22 @@ body {
     function endScrub() {
       if (!scrubbing) return;
       scrubbing = false;
-      _isScrubbing = false;
       track.classList.remove('dragging');
       fill.classList.remove('no-transition');
-      if (_audio && isPlaying) _audio.play();
+      if (_audio) {
+        // wait for seeked event before re-enabling ontimeupdate
+        _audio.onseeked = () => {
+          _isScrubbing = false;
+          _audio.onseeked = null;
+          if (isPlaying) _audio.play();
+        };
+        // if already at target (no seek needed), release immediately
+        setTimeout(() => {
+          if (_isScrubbing) { _isScrubbing = false; if (isPlaying) _audio.play(); }
+        }, 300);
+      } else {
+        _isScrubbing = false;
+      }
     }
 
     // Mouse
