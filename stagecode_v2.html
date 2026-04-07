@@ -1245,9 +1245,11 @@ body {
     if (_audio) { _audio.pause(); _audio.src = ''; _audio = null; }
   }
 
+  let _seekLock = false; // true while seeking, blocks timeupdate & ended
+
   function attachAudioEvents(audioEl) {
     audioEl.ontimeupdate = () => {
-      if (_isScrubbing) return;
+      if (_isScrubbing || _seekLock) return;
       if (!audioEl.duration || isNaN(audioEl.duration)) return;
       seconds = Math.floor(audioEl.currentTime);
       progress = (audioEl.currentTime / audioEl.duration) * 100;
@@ -1258,7 +1260,10 @@ body {
       updateDisplay();
       updateMiniBar();
     };
-    audioEl.onended = () => { nextSong(); };
+    audioEl.onended = () => {
+      if (_seekLock || _isScrubbing) return; // don't skip song during seek
+      nextSong();
+    };
     audioEl.onerror = (e) => {
       console.warn('音檔錯誤:', e);
       startTC();
@@ -1389,50 +1394,47 @@ body {
       scrubbing = false;
       track.classList.remove('dragging');
       fill.classList.remove('no-transition');
+
       if (_audio && _pendingSeekTime !== null) {
-        // temporarily disable onended during seek to prevent false nextSong()
-        const savedOnEnded = _audio.onended;
-        _audio.onended = null;
+        _seekLock = true; // block timeupdate & onended during seek
 
         function doSeek() {
           try {
             _audio.currentTime = _pendingSeekTime;
           } catch (e) {
             console.warn('Seek failed:', e);
+            _seekLock = false;
             _isScrubbing = false;
-            _audio.onended = savedOnEnded;
             if (isPlaying) _audio.play().catch(() => {});
             return;
           }
-          _audio.onseeked = () => {
-            _isScrubbing = false;
-            _audio.onseeked = null;
-            _audio.onended = savedOnEnded;
-            if (isPlaying) _audio.play().catch(() => {});
-          };
-          // fallback if onseeked never fires
-          setTimeout(() => {
-            if (_isScrubbing) {
+
+          function onSeeked() {
+            if (_audio) _audio.removeEventListener('seeked', onSeeked);
+            // Small delay to let browser settle — prevents stale timeupdate
+            setTimeout(() => {
+              _seekLock = false;
               _isScrubbing = false;
-              if (_audio) _audio.onended = savedOnEnded;
               if (isPlaying && _audio) _audio.play().catch(() => {});
-            }
-          }, 800);
+            }, 50);
+          }
+
+          _audio.addEventListener('seeked', onSeeked, { once: true });
+          // fallback if seeked never fires
+          setTimeout(() => {
+            if (_seekLock) onSeeked();
+          }, 1000);
         }
 
-        // If audio metadata not ready yet, wait for it
         if (_audio.readyState >= 1) {
           doSeek();
         } else {
           _audio.addEventListener('loadedmetadata', () => doSeek(), { once: true });
-          // fallback
           setTimeout(() => {
-            if (_isScrubbing) {
+            if (_seekLock) {
+              _seekLock = false;
               _isScrubbing = false;
-              if (_audio) {
-                _audio.onended = savedOnEnded;
-                if (isPlaying) _audio.play().catch(() => {});
-              }
+              if (isPlaying && _audio) _audio.play().catch(() => {});
             }
           }, 2000);
         }
