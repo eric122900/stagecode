@@ -1779,18 +1779,14 @@ body {
     attachAudioEvents(_audio);
     _routeAudio();
 
-    // If we need to seek to a specific position (medley song)
+    // Set seek position BEFORE play — blob is local so this works immediately
     if (seekTime != null && seekTime > 0) {
-      _audio.addEventListener('loadedmetadata', () => {
-        _audio.currentTime = seekTime;
-        _audio.play().catch(() => {});
-      }, { once: true });
-      _audio.load();
-    } else {
-      const playPromise = _audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(e => { console.warn('播放失敗:', e.message); });
-      }
+      console.log(`Medley seek: ${seekTime.toFixed(2)}s`);
+      _audio.currentTime = seekTime;
+    }
+    const playPromise = _audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(e => { console.warn('播放失敗:', e.message); });
     }
   }
 
@@ -1843,6 +1839,7 @@ body {
       const songLtcSec = parseLTC(song.ltc);
       const timeline = _ltcCache.get(song.driveFileId);
       const seekTime = timeline ? ltcToAudioTime(timeline, songLtcSec) : null;
+      console.log(`playSongIdx: "${song.title}" LTC=${song.ltc} (${songLtcSec}s), timeline=${timeline ? timeline.length + ' frames' : 'none'}, seekTime=${seekTime}`);
 
       playDriveAudio(song.driveFileId, seekTime);
       startFrameLoop();
