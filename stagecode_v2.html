@@ -2640,7 +2640,7 @@ body {
         <div class="drag-handle" data-handle="true">${DRAG_SVG}</div>
         <div class="song-num" style="${s.color ? 'color:' + s.color + '; font-weight:900;' : ''}">${isShow ? String(sectionIdx + 1).padStart(2, '0') : '—'}</div>
         <div class="song-info" onclick="_deleteMode ? toggleSongSelect(event, '${s.id || globalIdx}') : _colorMode ? toggleColorSelect(event, '${s.id || globalIdx}') : playSongIdx(${globalIdx})">
-          <div class="song-title">${s.title}</div>
+          <div class="song-title" style="${s.color ? 'color:' + s.color : ''}">${s.title}</div>
           <div class="song-ltc" style="${!isShow ? 'color:var(--muted)' : ''}">${s.ltc}</div>
         </div>
         <div class="song-actions">
