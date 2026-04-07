@@ -3149,26 +3149,29 @@ body {
     // ── SHOW table rows ──
     let showRows = '';
     parts.forEach((part, pi) => {
+      // VCR/Video Part header: 2 merged rows, larger text, right before its songs
       if (part.label) {
+        const vcrBg = '#fff3e0';
+        const vcrColor = '#e65100';
         showRows += `<tr>
-          <td style="background:#fff3e0;color:#e65100;font-weight:900;font-size:15pt;text-align:center;${bd}">${String(part.labelNum).padStart(2,'0')}</td>
-          <td style="background:#fff3e0;color:#e65100;font-weight:900;font-size:15pt;${bd}">${part.label.title}</td>
-          <td style="background:#fff3e0;color:#e65100;font-weight:700;font-size:14pt;font-family:'Consolas','Courier New',monospace;text-align:center;${bd}">${part.label.ltc}</td>
-          <td style="background:#fff3e0;color:#c77800;font-size:12pt;${bd}">${part.label.driveFileName || ''}</td>
-        </tr>`;
+          <td rowspan="2" style="background:${vcrBg};color:${vcrColor};font-weight:900;font-size:17pt;text-align:center;${bd}vertical-align:middle;">${String(part.labelNum).padStart(2,'0')}</td>
+          <td rowspan="2" style="background:${vcrBg};color:${vcrColor};font-weight:900;font-size:17pt;${bd}vertical-align:middle;">${part.label.title}</td>
+          <td rowspan="2" style="background:${vcrBg};color:${vcrColor};font-weight:700;font-size:16pt;font-family:'Consolas','Courier New',monospace;text-align:center;${bd}vertical-align:middle;">${part.label.ltc}</td>
+          <td rowspan="2" style="background:${vcrBg};color:#c77800;font-size:12pt;${bd}vertical-align:middle;">${part.label.driveFileName || ''}</td>
+        </tr>
+        <tr></tr>`;
       }
+      // Songs in this part
       part.songs.forEach(({ num: n, song: s }) => {
         const bg = (n % 2 === 0) ? '#f8f8f8' : '#ffffff';
+        const titleColor = s.color || '#222';
         showRows += `<tr>
           <td style="background:${bg};color:#999;font-weight:700;font-size:15pt;text-align:center;${bd}">${String(n).padStart(2,'0')}</td>
-          <td style="background:${bg};color:#222;font-weight:600;font-size:15pt;${bd}">${s.title}</td>
+          <td style="background:${bg};color:${titleColor};font-weight:600;font-size:15pt;${bd}">${s.title}</td>
           <td style="background:${bg};color:#666;font-size:14pt;font-family:'Consolas','Courier New',monospace;text-align:center;${bd}">${s.ltc}</td>
           <td style="background:${bg};color:#999;font-size:12pt;${bd}">${s.driveFileName || ''}</td>
         </tr>`;
       });
-      if (pi < parts.length - 1) {
-        showRows += `<tr><td colspan="4" style="border:none;padding:3px;font-size:3pt;">&nbsp;</td></tr>`;
-      }
     });
 
     const showCols = [
@@ -3182,9 +3185,10 @@ body {
     let otherRows = '';
     otherSongs.forEach((s, i) => {
       const bg = (i % 2 === 0) ? '#f8f8f8' : '#ffffff';
+      const titleColor = s.color || '#444';
       otherRows += `<tr>
         <td style="background:${bg};color:#999;font-weight:700;font-size:15pt;text-align:center;${bd}">${String(i+1).padStart(2,'0')}</td>
-        <td style="background:${bg};color:#444;font-weight:600;font-size:15pt;${bd}">${s.title}</td>
+        <td style="background:${bg};color:${titleColor};font-weight:600;font-size:15pt;${bd}">${s.title}</td>
         <td style="background:${bg};color:#888;font-size:14pt;font-family:'Consolas','Courier New',monospace;text-align:center;${bd}">${s.ltc}</td>
         <td style="background:${bg};color:#aaa;font-size:12pt;${bd}">${s.driveFileName || ''}</td>
       </tr>`;
