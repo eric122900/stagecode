@@ -2359,8 +2359,8 @@ body {
       const dot = document.getElementById('tcDecodingDot');
       const label = document.getElementById('tcFpsLabel');
       if (dot && label) {
-        dot.className = 'tc-decoding-dot live';
-        label.textContent = 'Time · Playing';
+        dot.className = isPlaying ? 'tc-decoding-dot live' : 'tc-decoding-dot no-signal';
+        label.textContent = isPlaying ? 'Time · Playing' : 'Time · Stop';
       }
       const stcEl = document.getElementById('setlistTcDisplay');
       if (stcEl && _audio) {
@@ -2397,8 +2397,9 @@ body {
       const dot = document.getElementById('tcDecodingDot');
       const label = document.getElementById('tcFpsLabel');
       if (dot && label) {
-        dot.className = 'tc-decoding-dot live';
-        label.textContent = `LTC · ${FPS_PRESETS[projectFpsKey].label} · Decoding`;
+        const fpsL = FPS_PRESETS[projectFpsKey].label;
+        dot.className = isPlaying ? 'tc-decoding-dot live' : 'tc-decoding-dot no-signal';
+        label.textContent = isPlaying ? `LTC · ${fpsL} · Decoding` : `LTC · ${fpsL} · Stop`;
       }
       const stcEl = document.getElementById('setlistTcDisplay');
       if (stcEl) {
@@ -2449,12 +2450,18 @@ body {
     const label = document.getElementById('tcFpsLabel');
     if (dot && label) {
       const fpsLabel = FPS_PRESETS[projectFpsKey].label;
-      if (isTimeMode) {
+      if (isTimeMode && isPlaying) {
         dot.className = 'tc-decoding-dot live';
         label.textContent = 'Time · Playing';
-      } else if (live) {
+      } else if (isTimeMode && !isPlaying) {
+        dot.className = 'tc-decoding-dot no-signal';
+        label.textContent = 'Time · Stop';
+      } else if (live && isPlaying) {
         dot.className = 'tc-decoding-dot live';
         label.textContent = `LTC · ${fpsLabel} · Decoding`;
+      } else if (live && !isPlaying) {
+        dot.className = 'tc-decoding-dot no-signal';
+        label.textContent = `LTC · ${fpsLabel} · Stop`;
       } else if (_audio) {
         dot.className = 'tc-decoding-dot no-signal';
         label.textContent = `LTC · ${fpsLabel} · No Signal`;
