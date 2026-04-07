@@ -1090,6 +1090,7 @@ body {
 
   // ── Audio player ──
   let _audio = null;
+  let _isScrubbing = false;
 
   function stopAudio() {
     if (_audio) { _audio.pause(); _audio.src = ''; _audio = null; }
@@ -1097,10 +1098,10 @@ body {
 
   function attachAudioEvents(audioEl) {
     audioEl.ontimeupdate = () => {
+      if (_isScrubbing) return; // don't fight with scrub
       if (!audioEl.duration || isNaN(audioEl.duration)) return;
       seconds = Math.floor(audioEl.currentTime);
       progress = (audioEl.currentTime / audioEl.duration) * 100;
-      // directly update fill and thumb for reliability
       const fill = document.getElementById('progressFill');
       const thumb = document.getElementById('progressThumb');
       if (fill) fill.style.width = progress + '%';
@@ -1188,6 +1189,8 @@ body {
 
     function startScrub(clientX) {
       scrubbing = true;
+      _isScrubbing = true;
+      if (_audio) _audio.pause();
       track.classList.add('dragging');
       fill.classList.add('no-transition');
       applyPercent(getPercent(clientX));
@@ -1201,8 +1204,10 @@ body {
     function endScrub() {
       if (!scrubbing) return;
       scrubbing = false;
+      _isScrubbing = false;
       track.classList.remove('dragging');
       fill.classList.remove('no-transition');
+      if (_audio && isPlaying) _audio.play();
     }
 
     // Mouse
