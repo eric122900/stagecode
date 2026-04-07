@@ -1171,14 +1171,17 @@ body {
   // ── Audio player ──
   let _audio = null;
   let _isScrubbing = false;
+  let _blobUrl = null; // cached blob URL for current song
+  const _blobCache = new Map(); // fileId → blobUrl cache
 
   function stopAudio() {
     if (_audio) { _audio.pause(); _audio.src = ''; _audio = null; }
+    // don't revoke blob — keep in cache for re-use
   }
 
   function attachAudioEvents(audioEl) {
     audioEl.ontimeupdate = () => {
-      if (_isScrubbing) return; // don't fight with scrub
+      if (_isScrubbing) return;
       if (!audioEl.duration || isNaN(audioEl.duration)) return;
       seconds = Math.floor(audioEl.currentTime);
       progress = (audioEl.currentTime / audioEl.duration) * 100;
@@ -1199,18 +1202,48 @@ body {
   function playDriveAudio(fileId) {
     stopAudio();
     if (!fileId || !_driveToken) return;
-    // Service Worker intercepts this URL and adds Authorization header
-    const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&sw_token=${_driveToken}`;
-    _audio = new Audio();
+
+    // If already cached as blob, play immediately
+    if (_blobCache.has(fileId)) {
+      _playBlobUrl(_blobCache.get(fileId));
+      return;
+    }
+
+    // Download entire file as blob first, then play locally
+    // This guarantees seek always works
+    const apiUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    startTC(); // show TC ticking while downloading
+
+    fetch(apiUrl, {
+      headers: { 'Authorization': 'Bearer ' + _driveToken },
+    })
+    .then(resp => {
+      if (!resp.ok) throw new Error('Drive download failed: ' + resp.status);
+      return resp.blob();
+    })
+    .then(blob => {
+      const blobUrl = URL.createObjectURL(blob);
+      _blobCache.set(fileId, blobUrl);
+      // Only play if this song is still the current one
+      if (currentSongIdx !== null && songs[currentSongIdx] && songs[currentSongIdx].driveFileId === fileId) {
+        stopTC();
+        _playBlobUrl(blobUrl);
+      }
+    })
+    .catch(e => {
+      console.warn('Drive 下載失敗:', e.message);
+      // TC is already running as fallback
+    });
+  }
+
+  function _playBlobUrl(blobUrl) {
+    _audio = new Audio(blobUrl);
     _audio.preload = 'auto';
-    _audio.crossOrigin = 'anonymous';
     attachAudioEvents(_audio);
-    _audio.src = streamUrl;
-    _audio.load();
     const playPromise = _audio.play();
     if (playPromise !== undefined) {
       playPromise.catch(e => {
-        console.warn('SW 串流失敗:', e.message);
+        console.warn('播放失敗:', e.message);
         startTC();
       });
     }
