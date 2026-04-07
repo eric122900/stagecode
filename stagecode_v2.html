@@ -1198,12 +1198,22 @@ body {
     setProjectFps(p.fpsKey || '30');
     updateProjectHeaders();
 
+    // Restore project-scoped Drive files
+    _driveFiles = p.driveFiles || [];
+    _allDriveFiles = new Map();
+    _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
+    // Also add files referenced by songs (in case driveFiles wasn't saved)
+    songs.forEach(s => {
+      if (s.driveFileId && !_allDriveFiles.has(s.driveFileId)) {
+        _allDriveFiles.set(s.driveFileId, s.driveFileName || s.driveFileId);
+      }
+    });
+
     // Only reset playback state if switching to a DIFFERENT project
     if (wasPlaying !== idx) {
       currentSongIdx = null;
       miniBuilt = false;
     }
-    // Don't stop audio — keep playing until user picks a different song
 
     renderSetlist();
     showScreen('screen-detail');
@@ -2892,7 +2902,15 @@ body {
   loadDriveToken();
 
   function driveCardClick() {
-    if (_driveToken) { showModal('driveModal'); return; }
+    if (_driveToken) {
+      // Pre-fill folder ID if project has one saved
+      const p = currentProject();
+      if (p && p.driveFolderId) {
+        document.getElementById('driveFolderInput').value = p.driveFolderId;
+      }
+      showModal('driveModal');
+      return;
+    }
     driveSignIn();
   }
 
@@ -2934,8 +2952,15 @@ body {
       _driveFiles = (data.files || []).filter(f =>
         /\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i.test(f.name)
       );
-      // Accumulate all known files
+      // Save to current project
+      _allDriveFiles = new Map();
       _driveFiles.forEach(f => _allDriveFiles.set(f.id, f.name));
+      const p = currentProject();
+      if (p) {
+        p.driveFiles = _driveFiles.map(f => ({ id: f.id, name: f.name }));
+        p.driveFolderId = folderId;
+        saveToStorage();
+      }
       if (!_driveFiles.length) {
         list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">資料夾裡沒有找到音檔</div>';
         return;
