@@ -3779,16 +3779,27 @@ body {
   }
 
   function driveApplyMatch() {
+    let movedCount = 0;
     _driveMatches.forEach(m => {
+      const s = songs.find(s => s.id === m.song.id);
+      if (!s) return;
       if (m.file) {
-        const s = songs.find(s => s.id === m.song.id);
-        if (s) { s.driveFileId = m.file.id; s.driveFileName = m.file.name; }
+        s.driveFileId = m.file.id;
+        s.driveFileName = m.file.name;
+      } else if (s.section === 'show' && !s.driveFileId) {
+        // No match and no existing audio → move to Other
+        s.section = 'other';
+        movedCount++;
       }
     });
     closeModal('driveMatchModal');
     renderSetlist();
+    miniBuilt = false;
     saveToStorage();
-    alert('配對已儲存！');
+    const msg = movedCount > 0
+      ? `配對已儲存！\n${movedCount} 首未配對的歌已移至 Other`
+      : '配對已儲存！';
+    alert(msg);
   }
 
   // ── Color mode ──
