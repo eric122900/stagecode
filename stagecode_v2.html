@@ -2002,21 +2002,37 @@ body {
       return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     }
 
+    // Sync both Player + Mini progress bars during scrub
+    function syncBars(pct) {
+      const pctStr = pct + '%';
+      // Player bar
+      fill.classList.add('no-transition');
+      fill.style.width = pctStr;
+      const th = document.getElementById('progressThumb');
+      if (th) th.style.left = pctStr;
+      // Mini bar
+      const mf = document.getElementById('miniBarFill');
+      const mt = document.getElementById('miniBarThumb');
+      if (mf) { mf.classList.add('no-transition'); mf.style.width = pctStr; }
+      if (mt) mt.style.left = pctStr;
+    }
+
+    function unlockBars() {
+      fill.classList.remove('no-transition');
+      const mf = document.getElementById('miniBarFill');
+      if (mf) mf.classList.remove('no-transition');
+    }
+
     function applyPercent(pct) {
       const totalDur = (_audio && _audio.duration && isFinite(_audio.duration)) ? _audio.duration : SONG_DURATION;
       const elapsed = pct * totalDur;
       seconds = Math.floor(elapsed);
       progress = pct * 100;
-      fill.classList.add('no-transition');
-      fill.style.width = progress + '%';
-      const th = document.getElementById('progressThumb');
-      if (th) th.style.left = progress + '%';
-      // seek audio — only set currentTime during endScrub, not during drag
+      syncBars(progress);
       _pendingSeekTime = elapsed;
       document.getElementById('currentTime').textContent = fmtTime(seconds);
       const rem = Math.floor(totalDur) - seconds;
       document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTime(rem)}`;
-      // Show pre-decoded LTC at scrub position
       _ltcDecoded = lookupTC(elapsed);
       if (_ltcDecoded) {
         const fmt2 = n => String(n).padStart(2, '0');
@@ -2024,7 +2040,6 @@ body {
         const ffSep = (tc.dropFrame || isDropFrame()) ? ';' : ':';
         document.getElementById('tcDisplay').innerHTML = `${fmt2(tc.hh)}:${fmt2(tc.mm)}<span class="tc-sep">:</span>${fmt2(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt2(tc.ff)}</span>`;
         document.getElementById('tcDisplay').style.opacity = '';
-        // Track which song we're scrubbing into
         detectCurrentSongByLTC();
       } else {
         document.getElementById('tcDisplay').innerHTML = `--:--<span class="tc-sep">:</span>--<span class="tc-ff-part">:--</span>`;
@@ -2037,7 +2052,6 @@ body {
       _isScrubbing = true;
       if (_audio) _audio.pause();
       track.classList.add('dragging');
-      fill.classList.add('no-transition');
       applyPercent(getPercent(clientX));
     }
 
@@ -2050,44 +2064,32 @@ body {
       if (!scrubbing) return;
       scrubbing = false;
       track.classList.remove('dragging');
-      fill.classList.remove('no-transition');
 
       if (_audio && _pendingSeekTime !== null) {
         _seekLock = true;
-        const gen = _audioGeneration; // snapshot to detect song change
-        const seekTarget = _pendingSeekTime;
+        const gen = _audioGeneration;
+        _audio.currentTime = _pendingSeekTime;
         _pendingSeekTime = null;
-
-        function unlock() {
-          if (_audioGeneration !== gen) return; // song changed, ignore
-          _seekLock = false;
-          _isScrubbing = false;
-          if (isPlaying && _audio) _audio.play().catch(() => {});
-        }
-
-        function doSeek() {
-          if (_audioGeneration !== gen) { _seekLock = false; _isScrubbing = false; return; }
-          try {
-            _audio.currentTime = seekTarget;
-          } catch (e) {
-            console.warn('Seek failed:', e);
-            unlock();
-            return;
+        _audio.addEventListener('seeked', () => {
+          setTimeout(() => {
+            if (_audioGeneration !== gen) return;
+            _seekLock = false;
+            _isScrubbing = false;
+            unlockBars();
+            if (isPlaying && _audio) _audio.play().catch(() => {});
+          }, 50);
+        }, { once: true });
+        setTimeout(() => {
+          if (_seekLock && _audioGeneration === gen) {
+            _seekLock = false;
+            _isScrubbing = false;
+            unlockBars();
+            if (isPlaying && _audio) _audio.play().catch(() => {});
           }
-          _audio.addEventListener('seeked', () => {
-            setTimeout(unlock, 50); // small settle delay
-          }, { once: true });
-          setTimeout(() => { if (_seekLock && _audioGeneration === gen) unlock(); }, 1000);
-        }
-
-        if (_audio.readyState >= 1) {
-          doSeek();
-        } else {
-          _audio.addEventListener('loadedmetadata', () => doSeek(), { once: true });
-          setTimeout(() => { if (_seekLock && _audioGeneration === gen) unlock(); }, 2000);
-        }
+        }, 1000);
       } else {
         _isScrubbing = false;
+        unlockBars();
       }
     }
 
@@ -2800,14 +2802,38 @@ body {
       return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     }
 
+    // Sync both Mini + Player progress bars
+    function syncAllBars(pctVal) {
+      const pctStr = pctVal + '%';
+      // Mini bar
+      fill.classList.add('no-transition');
+      fill.style.width = pctStr;
+      if (thumb) thumb.style.left = pctStr;
+      // Player bar
+      const pf = document.getElementById('progressFill');
+      const pt = document.getElementById('progressThumb');
+      if (pf) { pf.classList.add('no-transition'); pf.style.width = pctStr; }
+      if (pt) pt.style.left = pctStr;
+    }
+
+    function unlockAllBars() {
+      fill.classList.remove('no-transition');
+      const pf = document.getElementById('progressFill');
+      if (pf) pf.classList.remove('no-transition');
+    }
+
     function apply(pct) {
       if (!_audio || !_audio.duration) return;
       const t = pct * _audio.duration;
-      fill.classList.add('no-transition');
-      fill.style.width = (pct * 100) + '%';
-      if (thumb) thumb.style.left = (pct * 100) + '%';
+      progress = pct * 100;
+      seconds = Math.floor(t);
+      syncAllBars(progress);
       _ltcDecoded = lookupTC(t);
       detectCurrentSongByLTC();
+      // Update Player time labels
+      document.getElementById('currentTime').textContent = fmtTime(seconds);
+      const rem = Math.floor(_audio.duration) - seconds;
+      document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTime(rem)}`;
       _pendingMiniSeek = t;
     }
 
@@ -2838,7 +2864,7 @@ body {
             if (_audioGeneration !== gen) return;
             _seekLock = false;
             _isScrubbing = false;
-            fill.classList.remove('no-transition');
+            unlockAllBars();
             if (isPlaying && _audio) _audio.play().catch(() => {});
           }, 50);
         }, { once: true });
@@ -2846,13 +2872,13 @@ body {
           if (_seekLock && _audioGeneration === gen) {
             _seekLock = false;
             _isScrubbing = false;
-            fill.classList.remove('no-transition');
+            unlockAllBars();
             if (isPlaying && _audio) _audio.play().catch(() => {});
           }
         }, 1000);
       } else {
         _isScrubbing = false;
-        fill.classList.remove('no-transition');
+        unlockAllBars();
       }
     }
 
