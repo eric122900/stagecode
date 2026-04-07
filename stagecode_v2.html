@@ -160,7 +160,27 @@ body {
   background: linear-gradient(135deg, var(--accent), #c43000);
   display: flex; align-items: center; justify-content: center;
   font-size: 22px; flex-shrink: 0;
+  overflow: hidden; position: relative;
 }
+.project-thumb img {
+  width: 100%; height: 100%; object-fit: cover;
+  position: absolute; top: 0; left: 0;
+}
+.project-img-upload {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+}
+.project-img-preview {
+  width: 52px; height: 52px; border-radius: var(--radius);
+  background: var(--surface2); border: 2px dashed var(--border);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; flex-shrink: 0; cursor: pointer; position: relative;
+}
+.project-img-preview img {
+  width: 100%; height: 100%; object-fit: cover;
+  position: absolute; top: 0; left: 0;
+}
+.project-img-preview:hover { border-color: var(--accent); }
 
 .project-info { flex: 1; min-width: 0; }
 .project-name { font-size: 15px; font-weight: 800; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -995,7 +1015,18 @@ body {
       <div class="modal-title" id="projectModalTitle">新增 Project</div>
       <input class="modal-input" id="projectNameInput" placeholder="演唱會名稱（例：五月天 2025）" />
       <input class="modal-input" id="projectDateInput" placeholder="日期 / 場地（例：2025.08.15 · 台北小巨蛋）" />
-      <div class="modal-field-label">圖示</div>
+      <div class="modal-field-label">封面照片</div>
+      <div class="project-img-upload">
+        <div class="project-img-preview" id="projectImgPreview" onclick="document.getElementById('projectImgInput').click()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--muted)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+        </div>
+        <div style="flex:1;">
+          <button class="pill-btn ghost sm" onclick="document.getElementById('projectImgInput').click()" style="margin-bottom:4px;">上傳照片</button>
+          <button class="pill-btn ghost sm" onclick="clearProjectImage()" style="font-size:11px;color:var(--muted);">移除照片</button>
+        </div>
+        <input type="file" id="projectImgInput" accept="image/*" style="display:none;" onchange="handleProjectImage(this)" />
+      </div>
+      <div class="modal-field-label">圖示（無照片時使用）</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="projectEmojiPicker">
         <button class="emoji-pick" onclick="pickEmoji('🎸')">🎸</button>
         <button class="emoji-pick" onclick="pickEmoji('🎤')">🎤</button>
@@ -1140,8 +1171,11 @@ body {
     list.innerHTML = projects.map((p, i) => {
       const bg = p.color || PROJECT_COLORS[i % PROJECT_COLORS.length];
       const songCount = p.songs ? p.songs.length : 0;
+      const thumbContent = p.image
+        ? `<img src="${p.image}" />`
+        : (p.emoji || '🎵');
       return `<div class="project-card" onclick="openProject(${i})">
-        <div class="project-thumb" style="background:${bg}">${p.emoji || '🎵'}</div>
+        <div class="project-thumb" style="background:${bg}">${thumbContent}</div>
         <div class="project-info">
           <div class="project-name">${p.name}</div>
           <div class="project-meta-row">
@@ -1167,14 +1201,63 @@ body {
     });
   }
 
+  let _projectImage = null; // data URL or null
+
   function openNewProjectModal() {
     _editingProjectIdx = null;
     _projectEmoji = '🎵';
+    _projectImage = null;
     document.getElementById('projectNameInput').value = '';
     document.getElementById('projectDateInput').value = '';
     document.getElementById('projectModalTitle').textContent = '新增 Project';
     document.querySelectorAll('.emoji-pick').forEach(b => b.classList.remove('selected'));
+    updateProjectImgPreview();
     showModal('projectModal');
+  }
+
+  function handleProjectImage(input) {
+    const file = input.files[0];
+    if (!file) return;
+    compressImage(file, 200, 0.7, (dataUrl) => {
+      _projectImage = dataUrl;
+      updateProjectImgPreview();
+    });
+    input.value = ''; // reset so same file can be re-selected
+  }
+
+  function compressImage(file, maxSize, quality, callback) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        // Scale down to maxSize x maxSize (square crop from center)
+        const min = Math.min(w, h);
+        const sx = (w - min) / 2, sy = (h - min) / 2;
+        canvas.width = maxSize;
+        canvas.height = maxSize;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, sx, sy, min, min, 0, 0, maxSize, maxSize);
+        callback(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearProjectImage() {
+    _projectImage = null;
+    updateProjectImgPreview();
+  }
+
+  function updateProjectImgPreview() {
+    const preview = document.getElementById('projectImgPreview');
+    if (_projectImage) {
+      preview.innerHTML = `<img src="${_projectImage}" />`;
+    } else {
+      preview.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="var(--muted)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
+    }
   }
 
   function saveProject() {
@@ -1183,19 +1266,18 @@ body {
     const date = document.getElementById('projectDateInput').value.trim();
 
     if (_editingProjectIdx !== null) {
-      // editing existing
       projects[_editingProjectIdx].name = name;
       projects[_editingProjectIdx].date = date;
       projects[_editingProjectIdx].emoji = _projectEmoji;
-      // update headers if this is current project
+      if (_projectImage !== undefined) projects[_editingProjectIdx].image = _projectImage;
       if (_editingProjectIdx === currentProjectIdx) updateProjectHeaders();
     } else {
-      // new project
       projects.push({
         id: Math.random().toString(36).slice(2, 9),
         name,
         date,
         emoji: _projectEmoji,
+        image: _projectImage,
         color: PROJECT_COLORS[projects.length % PROJECT_COLORS.length],
         fpsKey: '30',
         songs: [],
