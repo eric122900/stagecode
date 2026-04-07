@@ -1239,13 +1239,26 @@ body {
   }
 
   function stopAudio() {
+    // Reset all seek/scrub state so new song starts clean
+    _seekLock = false;
+    _isScrubbing = false;
+    _pendingSeekTime = null;
+    _audioGeneration++;
     if (_sourceNode) { try { _sourceNode.disconnect(); } catch(e){} _sourceNode = null; }
     if (_splitter) { try { _splitter.disconnect(); } catch(e){} _splitter = null; }
     if (_merger) { try { _merger.disconnect(); } catch(e){} _merger = null; }
-    if (_audio) { _audio.pause(); _audio.src = ''; _audio = null; }
+    if (_audio) {
+      _audio.ontimeupdate = null;
+      _audio.onended = null;
+      _audio.onerror = null;
+      _audio.pause();
+      _audio.src = '';
+      _audio = null;
+    }
   }
 
   let _seekLock = false; // true while seeking, blocks timeupdate & ended
+  let _audioGeneration = 0; // increments on each song change, guards stale callbacks
 
   function attachAudioEvents(audioEl) {
     audioEl.ontimeupdate = () => {
@@ -1396,49 +1409,39 @@ body {
       fill.classList.remove('no-transition');
 
       if (_audio && _pendingSeekTime !== null) {
-        _seekLock = true; // block timeupdate & onended during seek
+        _seekLock = true;
+        const gen = _audioGeneration; // snapshot to detect song change
+        const seekTarget = _pendingSeekTime;
+        _pendingSeekTime = null;
+
+        function unlock() {
+          if (_audioGeneration !== gen) return; // song changed, ignore
+          _seekLock = false;
+          _isScrubbing = false;
+          if (isPlaying && _audio) _audio.play().catch(() => {});
+        }
 
         function doSeek() {
+          if (_audioGeneration !== gen) { _seekLock = false; _isScrubbing = false; return; }
           try {
-            _audio.currentTime = _pendingSeekTime;
+            _audio.currentTime = seekTarget;
           } catch (e) {
             console.warn('Seek failed:', e);
-            _seekLock = false;
-            _isScrubbing = false;
-            if (isPlaying) _audio.play().catch(() => {});
+            unlock();
             return;
           }
-
-          function onSeeked() {
-            if (_audio) _audio.removeEventListener('seeked', onSeeked);
-            // Small delay to let browser settle — prevents stale timeupdate
-            setTimeout(() => {
-              _seekLock = false;
-              _isScrubbing = false;
-              if (isPlaying && _audio) _audio.play().catch(() => {});
-            }, 50);
-          }
-
-          _audio.addEventListener('seeked', onSeeked, { once: true });
-          // fallback if seeked never fires
-          setTimeout(() => {
-            if (_seekLock) onSeeked();
-          }, 1000);
+          _audio.addEventListener('seeked', () => {
+            setTimeout(unlock, 50); // small settle delay
+          }, { once: true });
+          setTimeout(() => { if (_seekLock && _audioGeneration === gen) unlock(); }, 1000);
         }
 
         if (_audio.readyState >= 1) {
           doSeek();
         } else {
           _audio.addEventListener('loadedmetadata', () => doSeek(), { once: true });
-          setTimeout(() => {
-            if (_seekLock) {
-              _seekLock = false;
-              _isScrubbing = false;
-              if (isPlaying && _audio) _audio.play().catch(() => {});
-            }
-          }, 2000);
+          setTimeout(() => { if (_seekLock && _audioGeneration === gen) unlock(); }, 2000);
         }
-        _pendingSeekTime = null;
       } else {
         _isScrubbing = false;
       }
