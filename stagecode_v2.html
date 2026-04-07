@@ -615,6 +615,14 @@ body {
   cursor: pointer;
 }
 .delete-confirm-btn:disabled { opacity: 0.4; cursor: default; }
+.select-action-btn {
+  padding: 7px 14px; border-radius: 20px; border: none;
+  font-family: Nunito,sans-serif; font-size: 12px; font-weight: 800;
+  cursor: pointer;
+}
+.select-action-btn:disabled { opacity: 0.4; cursor: default; }
+.select-action-btn.move-show { background: rgba(255,106,26,0.15); color: var(--accent); border: 1px solid rgba(255,106,26,0.3); }
+.select-action-btn.move-other { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
 .delete-cancel-btn {
   padding: 7px 14px; border-radius: 20px; border: 1px solid var(--border);
   background: none; color: var(--text2);
@@ -784,11 +792,15 @@ body {
         <svg width="22" height="22" viewBox="0 0 24 24" fill="#000"><path d="M8 5v14l11-7z"/></svg>
       </button>
     </div>
-    <!-- delete mode bar -->
+    <!-- select mode bar -->
     <div class="delete-mode-bar" id="deleteModeBar">
       <button class="delete-cancel-btn" onclick="toggleDeleteMode()">取消</button>
       <span class="delete-count" id="deleteCount">已選 0 首</span>
-      <button class="delete-confirm-btn" id="deleteConfirmBtn" onclick="confirmDelete()" disabled>刪除</button>
+      <div style="display:flex;gap:6px;">
+        <button class="select-action-btn move-show" id="moveShowBtn" onclick="moveSelectedTo('show')" disabled>→ Show</button>
+        <button class="select-action-btn move-other" id="moveOtherBtn" onclick="moveSelectedTo('other')" disabled>→ Other</button>
+        <button class="delete-confirm-btn" id="deleteConfirmBtn" onclick="confirmDelete()" disabled>刪除</button>
+      </div>
     </div>
     <!-- color mode bar -->
     <div class="color-mode-bar" id="colorModeBar">
@@ -2651,7 +2663,7 @@ body {
             <span class="section-count">${showSongs.length} songs</span>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
-            <button id="deleteModeToggle" class="round-btn" style="width:28px;height:28px;font-size:13px;" onclick="toggleDeleteMode()" title="選取刪除">
+            <button id="deleteModeToggle" class="round-btn" style="width:28px;height:28px;font-size:13px;" onclick="toggleDeleteMode()" title="選取管理">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
             </button>
             <button class="pill-btn ghost xs" onclick="addSong('show')">＋ Add</button>
@@ -3779,27 +3791,16 @@ body {
   }
 
   function driveApplyMatch() {
-    let movedCount = 0;
     _driveMatches.forEach(m => {
-      const s = songs.find(s => s.id === m.song.id);
-      if (!s) return;
       if (m.file) {
-        s.driveFileId = m.file.id;
-        s.driveFileName = m.file.name;
-      } else if (s.section === 'show' && !s.driveFileId) {
-        // No match and no existing audio → move to Other
-        s.section = 'other';
-        movedCount++;
+        const s = songs.find(s => s.id === m.song.id);
+        if (s) { s.driveFileId = m.file.id; s.driveFileName = m.file.name; }
       }
     });
     closeModal('driveMatchModal');
     renderSetlist();
-    miniBuilt = false;
     saveToStorage();
-    const msg = movedCount > 0
-      ? `配對已儲存！\n${movedCount} 首未配對的歌已移至 Other`
-      : '配對已儲存！';
-    alert(msg);
+    alert('配對已儲存！');
   }
 
   // ── Color mode ──
@@ -3930,6 +3931,27 @@ body {
     const n = _selectedIds.size;
     document.getElementById('deleteCount').textContent = `已選 ${n} 首`;
     document.getElementById('deleteConfirmBtn').disabled = n === 0;
+    document.getElementById('moveShowBtn').disabled = n === 0;
+    document.getElementById('moveOtherBtn').disabled = n === 0;
+  }
+
+  function moveSelectedTo(section) {
+    if (_selectedIds.size === 0) return;
+    const n = _selectedIds.size;
+    songs.forEach(s => {
+      if (_selectedIds.has(s.id)) s.section = section;
+    });
+    _selectedIds.clear();
+    _deleteMode = false;
+    document.getElementById('deleteModeBar').classList.remove('visible');
+    const btn = document.getElementById('deleteModeToggle');
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.border = '';
+    document.getElementById('setlistArea').classList.remove('delete-mode-active');
+    miniBuilt = false;
+    renderSetlist();
+    saveToStorage();
   }
 
   function confirmDelete() {
