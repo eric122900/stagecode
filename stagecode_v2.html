@@ -3213,8 +3213,38 @@ body {
     if (!p || !p.driveFolders) return;
     const folderId = p.driveFolders[idx].id;
     p.driveFolders.splice(idx, 1);
-    // Remove files from this folder
+
+    // Collect file IDs being removed
+    const removedIds = new Set();
+    (p.driveFiles || []).forEach(f => {
+      if (f.folderId === folderId) removedIds.add(f.id);
+    });
+
+    // Remove files from project
     p.driveFiles = (p.driveFiles || []).filter(f => f.folderId !== folderId);
+
+    // Clear song associations pointing to removed files
+    songs.forEach(s => {
+      if (s.driveFileId && removedIds.has(s.driveFileId)) {
+        delete s.driveFileId;
+        delete s.driveFileName;
+      }
+    });
+
+    // Clear blob and LTC caches for removed files
+    removedIds.forEach(fid => {
+      if (_blobCache.has(fid)) {
+        URL.revokeObjectURL(_blobCache.get(fid));
+        _blobCache.delete(fid);
+      }
+      _ltcCache.delete(fid);
+    });
+
+    // Stop audio if currently playing a removed file
+    if (_audio && currentSongIdx !== null && songs[currentSongIdx] && !songs[currentSongIdx].driveFileId) {
+      stopAudio();
+    }
+
     // Rebuild runtime state
     _driveFiles = p.driveFiles || [];
     _allDriveFiles = new Map();
@@ -3222,6 +3252,7 @@ body {
     saveToStorage();
     renderDriveFolderList();
     renderDriveFileList();
+    renderSetlist();
   }
 
   function renderDriveFileList() {
