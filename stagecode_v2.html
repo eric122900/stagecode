@@ -3596,10 +3596,9 @@ body {
     });
 
     // ── LTC-based matching for fuzzy/none results ──
-    // For songs without exact match, try finding an audio file whose
-    // decoded LTC timeline contains the song's LTC start point (±1s)
+    // 1. Direct: song's own LTC exists in an audio file's timeline
     _driveMatches.forEach(m => {
-      if (m.type === 'exact') return; // already matched well
+      if (m.type === 'exact') return;
       const songLtcSec = parseLTC(m.song.ltc);
       let ltcFile = null;
       _driveFiles.forEach(f => {
@@ -3615,6 +3614,34 @@ body {
         m.score = 1;
       }
     });
+
+    // 2. Neighbor spread: if a song matched (exact/ltc), check ±5 neighbors
+    //    and assign the same file if their LTC exists in that file's timeline
+    let spread = true;
+    while (spread) {
+      spread = false;
+      _driveMatches.forEach((m, i) => {
+        if (m.type === 'exact' || m.type === 'ltc') {
+          // Check neighbors
+          for (let d = -5; d <= 5; d++) {
+            const ni = i + d;
+            if (ni < 0 || ni >= _driveMatches.length || ni === i) continue;
+            const neighbor = _driveMatches[ni];
+            if (neighbor.type === 'exact' || neighbor.type === 'ltc') continue; // already good
+            if (!m.file) continue;
+            const tl = _ltcCache.get(m.file.id);
+            if (!tl || tl.length === 0) continue;
+            const neighborLtcSec = parseLTC(neighbor.song.ltc);
+            if (songLtcExistsInTimeline(tl, neighborLtcSec)) {
+              neighbor.file = m.file;
+              neighbor.type = 'ltc';
+              neighbor.score = 1;
+              spread = true; // keep spreading
+            }
+          }
+        }
+      });
+    }
 
     // build match review UI
     const list = document.getElementById('driveMatchList');
