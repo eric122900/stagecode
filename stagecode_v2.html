@@ -1207,16 +1207,22 @@ body {
       track.classList.remove('dragging');
       fill.classList.remove('no-transition');
       if (_audio) {
-        // wait for seeked event before re-enabling ontimeupdate
+        // temporarily disable onended during seek to prevent false nextSong()
+        const savedOnEnded = _audio.onended;
+        _audio.onended = null;
         _audio.onseeked = () => {
           _isScrubbing = false;
           _audio.onseeked = null;
-          if (isPlaying) _audio.play();
+          _audio.onended = savedOnEnded; // restore onended
+          if (isPlaying) _audio.play().catch(() => {});
         };
-        // if already at target (no seek needed), release immediately
         setTimeout(() => {
-          if (_isScrubbing) { _isScrubbing = false; if (isPlaying) _audio.play(); }
-        }, 300);
+          if (_isScrubbing) {
+            _isScrubbing = false;
+            _audio.onended = savedOnEnded;
+            if (isPlaying) _audio.play().catch(() => {});
+          }
+        }, 500);
       } else {
         _isScrubbing = false;
       }
