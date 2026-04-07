@@ -674,6 +674,18 @@ body {
   padding-right: 28px;
 }
 .fps-select:focus { outline: none; border-color: var(--accent); }
+
+.setlist-tc-card {
+  background: var(--surface) !important; justify-content: center;
+}
+.setlist-tc-display {
+  font-family: 'DM Mono', monospace; font-size: 18px; font-weight: 500;
+  color: var(--accent); letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  text-align: center; width: 100%;
+  opacity: 0.3; transition: opacity 0.2s;
+}
+.setlist-tc-display.live { opacity: 1; }
 </style>
 </head>
 <body>
@@ -758,6 +770,9 @@ body {
             <option value="30" selected>30 fps</option>
           </select>
         </div>
+      </div>
+      <div class="info-card setlist-tc-card" style="cursor:default;">
+        <div class="setlist-tc-display" id="setlistTcDisplay">--:--:--:--</div>
       </div>
     </div>
     <div class="setlist-area" id="setlistArea"></div>
@@ -2189,6 +2204,18 @@ body {
         dot.className = 'tc-decoding-dot live';
         label.textContent = `LTC · ${FPS_PRESETS[projectFpsKey].label} · Decoding`;
       }
+
+      // Update setlist TC display
+      const stcEl = document.getElementById('setlistTcDisplay');
+      if (stcEl) {
+        const ffSep2 = (tc.dropFrame || isDropFrame()) ? ';' : ':';
+        stcEl.textContent = `${fmt(tc.hh)}:${fmt(tc.mm)}:${fmt(tc.ss)}${ffSep2}${fmt(tc.ff)}`;
+        stcEl.classList.add('live');
+      }
+    } else {
+      // No LTC — dim the setlist TC
+      const stcEl = document.getElementById('setlistTcDisplay');
+      if (stcEl) { stcEl.textContent = '--:--:--:--'; stcEl.classList.remove('live'); }
     }
   }
 
@@ -2203,10 +2230,14 @@ body {
       const ffSep = df ? ';' : ':';
       tcEl.innerHTML = `${fmt(tc.hh)}:${fmt(tc.mm)}<span class="tc-sep">:</span>${fmt(tc.ss)}<span class="tc-ff-part">${ffSep}${fmt(tc.ff)}</span>`;
       tcEl.style.opacity = '';
+      // Sync setlist TC
+      const stcEl = document.getElementById('setlistTcDisplay');
+      if (stcEl) { stcEl.textContent = `${fmt(tc.hh)}:${fmt(tc.mm)}:${fmt(tc.ss)}${ffSep}${fmt(tc.ff)}`; stcEl.classList.add('live'); }
     } else {
-      // No live LTC — show dashes, greyed out
       tcEl.innerHTML = `--:--<span class="tc-sep">:</span>--<span class="tc-ff-part">:--</span>`;
       tcEl.style.opacity = '0.25';
+      const stcEl = document.getElementById('setlistTcDisplay');
+      if (stcEl) { stcEl.textContent = '--:--:--:--'; stcEl.classList.remove('live'); }
     }
 
     // Update decoding status indicator
@@ -2590,7 +2621,15 @@ body {
     bar.classList.add('visible');
     const song = songs[currentSongIdx];
     document.getElementById('miniBarTitle').textContent = song ? song.title : '—';
-    document.getElementById('miniBarLTC').textContent = song ? song.ltc : '—';
+    // Show live decoded LTC in mini bar
+    if (hasLiveTC()) {
+      const tc = _ltcDecoded;
+      const fmt = n => String(n).padStart(2, '0');
+      const ffSep = (tc.dropFrame || isDropFrame()) ? ';' : ':';
+      document.getElementById('miniBarLTC').textContent = `${fmt(tc.hh)}:${fmt(tc.mm)}:${fmt(tc.ss)}${ffSep}${fmt(tc.ff)}`;
+    } else {
+      document.getElementById('miniBarLTC').textContent = song ? song.ltc : '—';
+    }
     document.getElementById('miniBarFill').style.width = progress + '%';
     document.getElementById('miniBarIcon').innerHTML = isPlaying ? pauseSVG : playSVG;
   }
