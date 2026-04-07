@@ -550,12 +550,19 @@ body {
   display: flex; align-items: center;
 }
 .mini-player-progress {
-  height: 2px; background: var(--surface3);
-  border-radius: 1px; margin-top: 8px; overflow: hidden;
+  height: 16px; background: transparent;
+  margin-top: 4px; position: relative;
+  cursor: pointer; display: flex; align-items: center;
+  touch-action: none; -webkit-user-select: none; user-select: none;
 }
+.mini-player-progress-rail {
+  width: 100%; height: 3px; background: var(--surface3);
+  border-radius: 1.5px; position: relative; overflow: hidden;
+}
+.mini-player-progress:active .mini-player-progress-rail { height: 5px; }
 .mini-player-fill {
   height: 100%; background: var(--accent);
-  border-radius: 1px; width: 0%;
+  border-radius: 1.5px; width: 0%;
   transition: width 0.5s linear;
 }
 
@@ -780,8 +787,8 @@ body {
     </div>
     <div class="setlist-area" id="setlistArea"></div>
     <!-- Mini Player Bar -->
-    <div class="mini-player-bar" id="miniPlayerBar" onclick="showPlayer()">
-      <div class="mini-player-bar-inner">
+    <div class="mini-player-bar" id="miniPlayerBar">
+      <div class="mini-player-bar-inner" onclick="showPlayer()">
         <div class="mini-player-art">🎵</div>
         <div class="mini-player-info">
           <div class="mini-player-title" id="miniBarTitle">—</div>
@@ -791,8 +798,10 @@ body {
           <svg id="miniBarIcon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
         </button>
       </div>
-      <div class="mini-player-progress">
-        <div class="mini-player-fill" id="miniBarFill"></div>
+      <div class="mini-player-progress" id="miniProgress">
+        <div class="mini-player-progress-rail">
+          <div class="mini-player-fill" id="miniBarFill"></div>
+        </div>
       </div>
     </div>
     <div class="tab-bar">
@@ -2759,6 +2768,65 @@ body {
     togglePlay();
   }
 
+  // ── Mini bar scrub ──
+  function initMiniScrub() {
+    const track = document.getElementById('miniProgress');
+    if (!track) return;
+    const fill = document.getElementById('miniBarFill');
+    let scrubbing = false;
+
+    function getPct(clientX) {
+      const rect = track.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    }
+
+    function apply(pct) {
+      if (!_audio || !_audio.duration) return;
+      const t = pct * _audio.duration;
+      fill.style.transition = 'none';
+      fill.style.width = (pct * 100) + '%';
+      _ltcDecoded = lookupTC(t);
+      detectCurrentSongByLTC();
+      updateMiniBar();
+      _pendingMiniSeek = t;
+    }
+
+    let _pendingMiniSeek = null;
+
+    function startMini(clientX) {
+      scrubbing = true;
+      _isScrubbing = true;
+      if (_audio) _audio.pause();
+      apply(getPct(clientX));
+    }
+
+    function moveMini(clientX) {
+      if (!scrubbing) return;
+      apply(getPct(clientX));
+    }
+
+    function endMini() {
+      if (!scrubbing) return;
+      scrubbing = false;
+      fill.style.transition = '';
+      if (_audio && _pendingMiniSeek !== null) {
+        _audio.currentTime = _pendingMiniSeek;
+        _pendingMiniSeek = null;
+        _isScrubbing = false;
+        if (isPlaying) _audio.play().catch(() => {});
+      } else {
+        _isScrubbing = false;
+      }
+    }
+
+    track.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); startMini(e.clientX); });
+    document.addEventListener('mousemove', e => moveMini(e.clientX));
+    document.addEventListener('mouseup', () => endMini());
+    track.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); startMini(e.touches[0].clientX); }, { passive: false });
+    track.addEventListener('touchmove', e => { e.preventDefault(); moveMini(e.touches[0].clientX); }, { passive: false });
+    track.addEventListener('touchend', () => endMini());
+  }
+
   // ── Excel Import / Export ──
   function xlsxExport() {
     closeModal('pdfModal');
@@ -3270,6 +3338,7 @@ body {
   loadFromStorage();
   renderProjectList();
   initScrub();
+  initMiniScrub();
 
   function showModal(id) { document.getElementById(id).classList.add('visible'); }
   function closeModal(id) { document.getElementById(id).classList.remove('visible'); }
