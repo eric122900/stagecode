@@ -1090,36 +1090,43 @@ body {
     if (_audio) { _audio.pause(); _audio.src = ''; _audio = null; }
   }
 
-  function playDriveAudio(fileId) {
-    stopAudio();
-    if (!fileId) return;
-    // use authenticated streaming via API with range support
-    const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${_driveToken}`;
-    _audio = new Audio(streamUrl);
-    _audio.preload = 'none';
-    _audio.play().catch(e => {
-      console.warn('串流失敗，嘗試備用方式:', e);
-      const fallbackUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-      _audio = new Audio(fallbackUrl);
-      _audio.play().catch(e2 => {
-        console.warn('備用方式也失敗:', e2);
-        startTC();
-      });
-    });
-    // audio drives progress — stop timer-based TC
-    stopTC();
-    _audio.ontimeupdate = () => {
+  function attachAudioEvents(audioEl) {
+    audioEl.ontimeupdate = () => {
       if (!_audio || !_audio.duration) return;
       seconds = Math.floor(_audio.currentTime);
       progress = (_audio.currentTime / _audio.duration) * 100;
       updateDisplay();
       updateMiniBar();
     };
-    _audio.onended = () => { stopTC(); nextSong(); };
-    _audio.onerror = (e) => {
+    audioEl.onended = () => { nextSong(); };
+    audioEl.onerror = (e) => {
       console.warn('音檔錯誤:', e);
       startTC();
     };
+  }
+
+  function playDriveAudio(fileId) {
+    stopAudio();
+    if (!fileId || !_driveToken) return;
+    const streamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${_driveToken}`;
+    _audio = new Audio(streamUrl);
+    attachAudioEvents(_audio);
+    const playPromise = _audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(e => {
+        console.warn('API 串流失敗:', e.message);
+        // fallback to public URL
+        stopAudio();
+        const fallbackUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+        _audio = new Audio(fallbackUrl);
+        attachAudioEvents(_audio);
+        _audio.play().catch(e2 => {
+          console.warn('備用方式也失敗:', e2.message);
+          _audio = null;
+          startTC();
+        });
+      });
+    }
   }
 
   function playSongIdx(globalIdx) {
