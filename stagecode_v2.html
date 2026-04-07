@@ -3518,25 +3518,27 @@ body {
     return str
       .replace(/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i, '')  // remove extension
       .replace(/\([^)]*\)/g, '')                             // remove (LTC+Cue), (Short Ver), etc.
+      .replace(/"/g, '')                                     // remove quotes
       .replace(/\b(new|final|revised|demo|master|mix|ver|v\d+|version\d*)\b/gi, '') // remove common tags
       .replace(/\b\d{6,8}\b/g, '')                           // remove date codes like 260219
-      .replace(/^[\d]+[._+\s-]+/, '')                        // remove leading track numbers (1.0+1.1, 01-, etc.)
-      .replace(/[_\-+]+/g, ' ')                              // + _ - → space
+      .replace(/^[\d]+[._+\s/-]+/, '')                       // remove leading track numbers
+      .replace(/[_\-+/]+/g, ' ')                             // + _ - / → space
       .replace(/\s+/g, ' ')
       .trim()
       .toUpperCase();
   }
 
-  // Split a name into sub-song names (for medley filenames like "Song A+Song B+Song C")
+  // Split a name into sub-song names (for medley filenames like "Song A+Song B/Song C")
   function driveSplitNames(str) {
-    // Split on + but keep each part as a separate name
     const cleaned = str
       .replace(/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i, '')
       .replace(/\([^)]*\)/g, '')
+      .replace(/"/g, '')
       .replace(/\b(new|final|revised|demo|master|mix|ver|v\d+|version\d*)\b/gi, '')
       .replace(/\b\d{6,8}\b/g, '')
-      .replace(/^[\d]+[._+\s-]+/, '');
-    return cleaned.split('+').map(s => s.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase()).filter(s => s.length > 0);
+      .replace(/^[\d]+[._+\s/-]+/, '');
+    // Split on + or / (medley separators)
+    return cleaned.split(/[+/]/).map(s => s.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase()).filter(s => s.length > 1);
   }
 
   function driveSimilarity(songName, fileName) {
