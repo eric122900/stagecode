@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://apis.google.com/js/api.js"></script>
+<script src="https://accounts.google.com/gsi/client"></script>
 <title>STAGECODE — Concert PGM Tool</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=DM+Mono:wght@300;400;500&display=swap');
@@ -623,6 +625,27 @@ body {
 .color-mode-active .drag-handle { display: none; }
 .color-mode-active .song-actions { display: none; }
 .song-row.color-selected { outline: 2px solid rgba(255,255,255,0.3); outline-offset: -2px; }
+
+/* ── Drive ── */
+.drive-file-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: var(--surface2);
+  border-radius: 10px; font-size: 13px;
+}
+.drive-file-icon { font-size: 18px; flex-shrink: 0; }
+.drive-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+.drive-file-name.matched { color: var(--text); }
+.match-row {
+  background: var(--surface2); border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.match-song { font-size: 13px; font-weight: 700; }
+.match-file { font-size: 11px; color: var(--text2); font-family: 'DM Mono', monospace; }
+.match-status { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 20px; display: inline-block; }
+.match-ok { background: rgba(29,185,84,0.15); color: #1db954; }
+.match-fuzzy { background: rgba(255,106,26,0.15); color: var(--accent); }
+.match-none { background: var(--surface3); color: var(--muted); }
+.match-select { background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: var(--text); font-family: Nunito,sans-serif; font-size: 12px; width: 100%; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -721,11 +744,11 @@ body {
       <button class="seg-btn" onclick="toggleSeg(this)">L=LTC · R=Music</button>
     </div>
     <div class="info-cards">
-      <div class="info-card">
+      <div class="info-card" id="driveCard" onclick="driveCardClick()">
         <div class="info-card-icon">▲</div>
         <div class="info-card-text">
           <div class="info-card-label">Google Drive</div>
-          <div class="info-card-val accent">已連結</div>
+          <div class="info-card-val" id="driveStatus">點擊登入</div>
         </div>
       </div>
       <div class="info-card" onclick="showModal('pdfModal')">
@@ -911,6 +934,45 @@ body {
     </div>
   </div>
 </div>
+
+  <!-- MODAL: Google Drive -->
+  <div class="modal-overlay" id="driveModal">
+    <div class="modal-sheet" style="max-height:85vh;display:flex;flex-direction:column;padding-bottom:16px;">
+      <div class="modal-handle"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-shrink:0;">
+        <div class="modal-title" style="margin:0;">Google Drive</div>
+        <button class="delete-cancel-btn" onclick="closeModal('driveModal')">關閉</button>
+      </div>
+      <!-- folder input -->
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-shrink:0;">
+        <input class="modal-input" id="driveFolderInput" placeholder="貼上 Drive 資料夾 ID 或網址…" style="margin:0;flex:1;" />
+        <button class="color-apply-btn" onclick="driveLoadFolder()">載入</button>
+      </div>
+      <!-- file list -->
+      <div id="driveFileList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
+        <div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">登入 Google 後載入資料夾</div>
+      </div>
+      <!-- match button -->
+      <div style="padding-top:12px;flex-shrink:0;">
+        <button class="color-apply-btn" style="width:100%;padding:14px;" onclick="driveMatchFiles()">🔗 自動配對音檔</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Drive match review -->
+  <div class="modal-overlay" id="driveMatchModal">
+    <div class="modal-sheet" style="max-height:88vh;display:flex;flex-direction:column;padding-bottom:16px;">
+      <div class="modal-handle"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-shrink:0;">
+        <div class="modal-title" style="margin:0;">配對確認</div>
+        <span id="driveMatchCount" style="font-size:12px;color:var(--text2);font-weight:700;"></span>
+      </div>
+      <div id="driveMatchList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
+      <div style="padding-top:12px;flex-shrink:0;">
+        <button class="color-apply-btn" style="width:100%;padding:14px;" onclick="driveApplyMatch()">確認儲存配對</button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: PDF -->
   <div class="modal-overlay" id="pdfModal">
@@ -1706,6 +1768,159 @@ body {
   }
 
 
+
+
+  // ── Google Drive ──
+  const GDRIVE_CLIENT_ID = '2127095229-vdpjfe8v5th148mmdvd1lok245o9f17d.apps.googleusercontent.com';
+  const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+  let _driveToken = null;
+  let _driveFiles = []; // { id, name } from loaded folder
+  let _driveMatches = []; // { song, file, type, selected }
+
+  function driveCardClick() {
+    if (_driveToken) { showModal('driveModal'); return; }
+    driveSignIn();
+  }
+
+  function driveSignIn() {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GDRIVE_CLIENT_ID,
+      scope: GDRIVE_SCOPES,
+      callback: (resp) => {
+        if (resp.error) { alert('Google 登入失敗：' + resp.error); return; }
+        _driveToken = resp.access_token;
+        document.getElementById('driveStatus').textContent = '已連結';
+        document.getElementById('driveStatus').style.color = 'var(--accent)';
+        showModal('driveModal');
+      }
+    });
+    client.requestAccessToken();
+  }
+
+  async function driveLoadFolder() {
+    if (!_driveToken) { driveSignIn(); return; }
+    let input = document.getElementById('driveFolderInput').value.trim();
+    // extract folder ID from URL if needed
+    const m = input.match(/[-\w]{25,}/);
+    const folderId = m ? m[0] : input;
+    if (!folderId) { alert('請輸入資料夾 ID 或網址'); return; }
+
+    const list = document.getElementById('driveFileList');
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">載入中…</div>';
+
+    try {
+      const resp = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType)&pageSize=200`,
+        { headers: { Authorization: 'Bearer ' + _driveToken } }
+      );
+      const data = await resp.json();
+      if (data.error) { throw new Error(data.error.message); }
+      // filter audio files
+      _driveFiles = (data.files || []).filter(f =>
+        /\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i.test(f.name)
+      );
+      if (!_driveFiles.length) {
+        list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px;">資料夾裡沒有找到音檔</div>';
+        return;
+      }
+      list.innerHTML = _driveFiles.map(f =>
+        `<div class="drive-file-row">
+          <span class="drive-file-icon">🎵</span>
+          <span class="drive-file-name">${f.name}</span>
+        </div>`
+      ).join('');
+    } catch(e) {
+      list.innerHTML = `<div style="text-align:center;color:#ff5555;font-size:13px;padding:24px;">載入失敗：${e.message}</div>`;
+    }
+  }
+
+  function driveCleanName(str) {
+    return str
+      .replace(/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i, '')
+      .replace(/\b(new|final|revised|demo|master|mix|v\d+|version\d*|\d{4}[-_]?\d{2}[-_]?\d{2}|\d{8})\b/gi, '')
+      .replace(/^[\d]+[._\s-]+/, '') // remove leading track numbers
+      .replace(/[_\-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+
+  function driveSimilarity(a, b) {
+    // check if b contains a or a contains b
+    if (b.includes(a) || a.includes(b)) return 0.9;
+    // count matching words
+    const wa = new Set(a.split(' ').filter(w => w.length > 1));
+    const wb = new Set(b.split(' ').filter(w => w.length > 1));
+    let match = 0;
+    wa.forEach(w => { if (wb.has(w)) match++; });
+    const score = match / Math.max(wa.size, wb.size, 1);
+    return score;
+  }
+
+  function driveMatchFiles() {
+    if (!_driveFiles.length) { alert('請先載入資料夾'); return; }
+    closeModal('driveModal');
+
+    _driveMatches = songs.map(song => {
+      const cleanSong = driveCleanName(song.title);
+      let bestFile = null, bestScore = 0;
+      _driveFiles.forEach(f => {
+        const cleanFile = driveCleanName(f.name);
+        const score = driveSimilarity(cleanSong, cleanFile);
+        if (score > bestScore) { bestScore = score; bestFile = f; }
+      });
+      let type = 'none';
+      if (bestScore >= 0.9) type = 'exact';
+      else if (bestScore >= 0.4) type = 'fuzzy';
+      return { song, file: bestScore >= 0.4 ? bestFile : null, score: bestScore, type };
+    });
+
+    // build match review UI
+    const list = document.getElementById('driveMatchList');
+    const count = document.getElementById('driveMatchCount');
+    const matched = _driveMatches.filter(m => m.type !== 'none').length;
+    count.textContent = `${matched} / ${_driveMatches.length} 配對`;
+
+    const typeLabel = { exact: '完全配對', fuzzy: '模糊配對', none: '未找到' };
+    const typeCls = { exact: 'match-ok', fuzzy: 'match-fuzzy', none: 'match-none' };
+
+    list.innerHTML = _driveMatches.map((m, i) => {
+      const fileOpts = _driveFiles.map(f =>
+        `<option value="${f.id}" ${m.file && f.id === m.file.id ? 'selected' : ''}>${f.name}</option>`
+      ).join('');
+      return `<div class="match-row">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="match-status ${typeCls[m.type]}">${typeLabel[m.type]}</span>
+          <span class="match-song">${m.song.title}</span>
+        </div>
+        <div class="match-file">${m.file ? m.file.name : '—'}</div>
+        <select class="match-select" onchange="driveUpdateMatch(${i}, this.value)">
+          <option value="">（不配對）</option>
+          ${fileOpts}
+        </select>
+      </div>`;
+    }).join('');
+
+    showModal('driveMatchModal');
+  }
+
+  function driveUpdateMatch(idx, fileId) {
+    const f = _driveFiles.find(f => f.id === fileId) || null;
+    _driveMatches[idx].file = f;
+    _driveMatches[idx].type = f ? 'fuzzy' : 'none';
+  }
+
+  function driveApplyMatch() {
+    _driveMatches.forEach(m => {
+      if (m.file) {
+        const s = songs.find(s => s.id === m.song.id);
+        if (s) { s.driveFileId = m.file.id; s.driveFileName = m.file.name; }
+      }
+    });
+    closeModal('driveMatchModal');
+    renderSetlist();
+    alert('配對已儲存！');
+  }
 
   // ── Color mode ──
   const COLOR_PALETTE = [
