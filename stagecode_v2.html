@@ -3658,6 +3658,26 @@ body {
 
   // ── Init: load projects from localStorage ──
   loadFromStorage();
+
+  // Clean up orphaned audio references in all projects
+  (function cleanOrphanedAudio() {
+    let changed = false;
+    projects.forEach(p => {
+      const validFileIds = new Set((p.driveFiles || []).map(f => f.id));
+      (p.songs || []).forEach(s => {
+        if (s.driveFileId && !validFileIds.has(s.driveFileId)) {
+          delete s.driveFileId;
+          delete s.driveFileName;
+          changed = true;
+        }
+      });
+    });
+    if (changed) {
+      saveToStorage();
+      console.log('Cleaned orphaned audio references');
+    }
+  })();
+
   renderProjectList();
   initScrub();
   initMiniScrub();
