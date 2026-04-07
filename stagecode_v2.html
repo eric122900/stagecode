@@ -2069,7 +2069,7 @@ body {
         document.getElementById('remainTime').textContent = rem <= 0 ? '0:00' : `-${fmtTimeHMS(rem)}`;
         const fmt2 = n => String(n).padStart(2, '0');
         const h = Math.floor(elapsed / 3600), m = Math.floor((elapsed % 3600) / 60), s = Math.floor(elapsed) % 60;
-        tcEl.innerHTML = `${h > 0 ? fmt2(h) + ':' : ''}${fmt2(m)}<span class="tc-sep">:</span>${fmt2(s)}<span class="tc-ff-part" style="visibility:hidden">:00</span>`;
+        tcEl.innerHTML = `${h > 0 ? fmt2(h) + ':' : ''}${fmt2(m)}<span class="tc-sep">:</span>${fmt2(s)}`;
         tcEl.style.opacity = '';
       } else {
         // LTC mode scrub
@@ -2338,7 +2338,7 @@ body {
         const m = Math.floor((curTime % 3600) / 60);
         const s = Math.floor(curTime) % 60;
         const fmt = n => String(n).padStart(2, '0');
-        tcEl.innerHTML = `${h > 0 ? fmt(h) + ':' : ''}${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part" style="visibility:hidden">:00</span>`;
+        tcEl.innerHTML = `${h > 0 ? fmt(h) + ':' : ''}${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}`;
         tcEl.style.opacity = '';
 
         const fill = document.getElementById('progressFill');
@@ -2425,7 +2425,7 @@ body {
       const h = Math.floor(curTime / 3600);
       const m = Math.floor((curTime % 3600) / 60);
       const s = Math.floor(curTime) % 60;
-      tcEl.innerHTML = `${h > 0 ? fmt(h) + ':' : ''}${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}<span class="tc-ff-part" style="visibility:hidden">:00</span>`;
+      tcEl.innerHTML = `${h > 0 ? fmt(h) + ':' : ''}${fmt(m)}<span class="tc-sep">:</span>${fmt(s)}`;
       tcEl.style.opacity = '';
       const stcEl = document.getElementById('setlistTcDisplay');
       if (stcEl) { stcEl.textContent = fmtTimeHMS(curTime); stcEl.classList.add('live'); }
