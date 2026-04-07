@@ -1313,155 +1313,148 @@ body {
   const _blobCache = new Map(); // fileId → blobUrl cache
 
   // ── LTC Decoder (SMPTE Biphase Mark Code) ──
-  let _ltcDecoded = null; // { hh, mm, ss, ff } or null if no valid decode
+  let _ltcDecoded = null; // { hh, mm, ss, ff } or null
   let _ltcDecodedAt = 0;  // performance.now() of last valid decode
   let _ltcProcessor = null;
 
   function createLTCDecoder(ctx) {
-    // ScriptProcessor to analyze raw LTC samples
-    const bufSize = 1024;
+    const bufSize = 2048;
     const processor = ctx.createScriptProcessor(bufSize, 1, 1);
     const sampleRate = ctx.sampleRate;
 
-    // Decoder state
-    let prevSample = 0;
-    let samplesSinceTransition = 0;
-    let bitBuffer = [];
-    let halfBitLen = 0; // estimated samples per half-bit
-    let lastTransitionWasHalf = false;
-    let syncLocked = false;
-    // Adaptive threshold
-    let shortAvg = 0;
-    let longAvg = 0;
-    let transitionCount = 0;
+    // Use FPS setting to pre-calculate expected bit timing
+    const fps = getFpsNominal();
+    const bitsPerSec = fps * 80;
+    const expectedBitLen = sampleRate / bitsPerSec;     // samples per full bit
+    const expectedHalfBit = expectedBitLen / 2;          // samples per half bit
+    const midpoint = expectedBitLen * 0.75;              // threshold between short & long
+
+    // State
+    let prevSign = 0;         // -1 or +1 (after hysteresis)
+    let sampCount = 0;        // samples since last transition
+    let bitBuf = [];          // accumulated bits
+    let lastHalf = false;     // waiting for second half of a '1' bit
+    let signalPeak = 0.005;   // auto-tracked peak amplitude
 
     processor.onaudioprocess = (e) => {
-      const input = e.inputBuffer.getChannelData(0);
-      const output = e.outputBuffer.getChannelData(0);
-      // silence output (LTC channel should not be heard)
-      for (let i = 0; i < output.length; i++) output[i] = 0;
+      const inp = e.inputBuffer.getChannelData(0);
+      const out = e.outputBuffer.getChannelData(0);
+      for (let k = 0; k < out.length; k++) out[k] = 0; // silence
 
-      for (let i = 0; i < input.length; i++) {
-        const sample = input[i];
-        samplesSinceTransition++;
+      for (let k = 0; k < inp.length; k++) {
+        const s = inp[k];
+        sampCount++;
 
-        // Detect zero crossing
-        if ((prevSample >= 0 && sample < 0) || (prevSample < 0 && sample >= 0)) {
-          const interval = samplesSinceTransition;
-          samplesSinceTransition = 0;
+        // Track peak amplitude (fast attack, slow decay)
+        const a = Math.abs(s);
+        if (a > signalPeak) signalPeak = a;
+        else signalPeak = signalPeak * 0.99995;
 
-          // Skip very short intervals (noise)
-          if (interval < 4) { prevSample = sample; continue; }
+        // Hysteresis zero-crossing: only toggle when crossing ±threshold
+        const thresh = signalPeak * 0.2;
+        let sign = 0;
+        if (s > thresh) sign = 1;
+        else if (s < -thresh) sign = -1;
 
-          // Bootstrap: collect first transitions to establish timing
-          if (transitionCount < 20) {
-            transitionCount++;
-            if (transitionCount === 1) { shortAvg = interval; longAvg = interval * 2; }
-            else {
-              const threshold = (shortAvg + longAvg) / 2;
-              if (interval < threshold) shortAvg = shortAvg * 0.8 + interval * 0.2;
-              else longAvg = longAvg * 0.8 + interval * 0.2;
-            }
-            prevSample = sample;
+        if (sign === 0 || sign === prevSign) continue;
+        if (prevSign === 0) { prevSign = sign; continue; } // first crossing — just set sign
+
+        // We have a transition
+        const interval = sampCount;
+        sampCount = 0;
+        prevSign = sign;
+
+        // Reject intervals way outside expected range
+        if (interval < expectedHalfBit * 0.3 || interval > expectedBitLen * 3) {
+          lastHalf = false;
+          continue;
+        }
+
+        const isShort = interval < midpoint;
+
+        if (isShort) {
+          if (lastHalf) {
+            // Two short intervals = one '1' bit
+            bitBuf.push(1);
+            lastHalf = false;
+          } else {
+            lastHalf = true;
+          }
+        } else {
+          if (lastHalf) {
+            // Framing error — long after single short
+            lastHalf = false;
+            bitBuf = [];
             continue;
           }
+          bitBuf.push(0);
+        }
 
-          const threshold = (shortAvg + longAvg) / 2;
-          const isShort = interval < threshold;
+        // Keep buffer manageable
+        if (bitBuf.length > 200) bitBuf = bitBuf.slice(-100);
 
-          // Update running averages
-          if (isShort) shortAvg = shortAvg * 0.9 + interval * 0.1;
-          else longAvg = longAvg * 0.9 + interval * 0.1;
-
-          if (isShort) {
-            if (lastTransitionWasHalf) {
-              // Two short intervals = one '1' bit
-              bitBuffer.push(1);
-              lastTransitionWasHalf = false;
-            } else {
-              lastTransitionWasHalf = true;
-            }
-          } else {
-            // One long interval = one '0' bit
-            if (lastTransitionWasHalf) {
-              // Framing error — reset
-              lastTransitionWasHalf = false;
-              bitBuffer = [];
-            }
-            bitBuffer.push(0);
-            lastTransitionWasHalf = false;
-          }
-
-          // Keep buffer to max 160 bits (2 frames worth)
-          if (bitBuffer.length > 160) bitBuffer = bitBuffer.slice(-80);
-
-          // Look for sync word at end of buffer (need at least 80 bits)
-          if (bitBuffer.length >= 80) {
-            const frame = tryDecodeLTCFrame(bitBuffer);
-            if (frame) {
-              _ltcDecoded = frame;
-              _ltcDecodedAt = performance.now();
-              bitBuffer = [];
-            }
+        // Try decoding whenever we have enough bits
+        if (bitBuf.length >= 80) {
+          const frame = tryDecodeLTCFrame(bitBuf);
+          if (frame) {
+            _ltcDecoded = frame;
+            _ltcDecodedAt = performance.now();
+            bitBuf = []; // clear for next frame
           }
         }
-        prevSample = sample;
       }
     };
     return processor;
   }
 
-  // SMPTE LTC sync word: 0011 1111 1111 1101 (bits 64-79)
+  // SMPTE LTC sync word (bits 64-79): 0011 1111 1111 1101
   const LTC_SYNC_FWD = [0,0,1,1, 1,1,1,1, 1,1,1,1, 1,1,0,1];
-  const LTC_SYNC_REV = [1,0,1,1, 1,1,1,1, 1,1,1,1, 1,1,0,0];
 
   function tryDecodeLTCFrame(bits) {
     const len = bits.length;
-    // Check for forward sync at end of buffer
-    const last80 = bits.slice(len - 80);
-    const syncBits = last80.slice(64, 80);
-    let forward = true;
-    for (let i = 0; i < 16; i++) {
-      if (syncBits[i] !== LTC_SYNC_FWD[i]) { forward = false; break; }
-    }
-    if (!forward) {
-      // Try reverse
-      let reverse = true;
-      const first16 = last80.slice(0, 16);
+
+    // Scan backwards through the buffer looking for sync word
+    for (let start = len - 80; start >= 0; start--) {
+      // Check sync word at bits [start+64 .. start+79]
+      let match = true;
       for (let i = 0; i < 16; i++) {
-        if (first16[i] !== LTC_SYNC_REV[i]) { reverse = false; break; }
+        if (bits[start + 64 + i] !== LTC_SYNC_FWD[i]) { match = false; break; }
       }
-      if (!reverse) return null;
-      // Reverse the frame
-      last80.reverse();
+      if (!match) continue;
+
+      // Found sync — extract 80-bit frame
+      const b = bits.slice(start, start + 80);
+
+      // Decode BCD fields (LSB first per SMPTE 12M)
+      const frameUnits = b[0] + b[1]*2 + b[2]*4 + b[3]*8;
+      const frameTens  = b[8] + b[9]*2;
+      const secUnits   = b[16] + b[17]*2 + b[18]*4 + b[19]*8;
+      const secTens    = b[24] + b[25]*2 + b[26]*4;
+      const minUnits   = b[32] + b[33]*2 + b[34]*4 + b[35]*8;
+      const minTens    = b[40] + b[41]*2 + b[42]*4;
+      const hrUnits    = b[48] + b[49]*2 + b[50]*4 + b[51]*8;
+      const hrTens     = b[56] + b[57]*2;
+      const dropFlag   = b[10];
+
+      const ff = frameTens * 10 + frameUnits;
+      const ss = secTens * 10 + secUnits;
+      const mm = minTens * 10 + minUnits;
+      const hh = hrTens * 10 + hrUnits;
+
+      // Sanity check
+      if (hh > 23 || mm > 59 || ss > 59 || ff > 39) continue;
+
+      // Remove consumed bits from buffer
+      bits.splice(0, start + 80);
+
+      return { hh, mm, ss, ff, dropFrame: dropFlag === 1 };
     }
-
-    // Decode BCD fields from the 80-bit frame
-    const b = last80;
-    const frameUnits = b[0] + b[1]*2 + b[2]*4 + b[3]*8;
-    const frameTens  = b[8] + b[9]*2;
-    const secUnits   = b[16] + b[17]*2 + b[18]*4 + b[19]*8;
-    const secTens    = b[24] + b[25]*2 + b[26]*4;
-    const minUnits   = b[32] + b[33]*2 + b[34]*4 + b[35]*8;
-    const minTens    = b[40] + b[41]*2 + b[42]*4;
-    const hrUnits    = b[48] + b[49]*2 + b[50]*4 + b[51]*8;
-    const hrTens     = b[56] + b[57]*2;
-    const dropFlag   = b[10];
-
-    const ff = frameTens * 10 + frameUnits;
-    const ss = secTens * 10 + secUnits;
-    const mm = minTens * 10 + minUnits;
-    const hh = hrTens * 10 + hrUnits;
-
-    // Sanity check
-    if (hh > 23 || mm > 59 || ss > 59 || ff > 39) return null;
-
-    return { hh, mm, ss, ff, dropFrame: dropFlag === 1 };
+    return null;
   }
 
-  // Check if we have a fresh decoded LTC value (within last 500ms)
+  // Check if we have a fresh decoded LTC value (within last 1s)
   function hasLiveTC() {
-    return _ltcDecoded !== null && (performance.now() - _ltcDecodedAt) < 500;
+    return _ltcDecoded !== null && (performance.now() - _ltcDecodedAt) < 1000;
   }
 
   // ── Channel routing (mute LTC channel, decode LTC) ──
